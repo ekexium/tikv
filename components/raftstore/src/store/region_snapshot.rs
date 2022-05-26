@@ -207,8 +207,7 @@ where
             self.region.get_id(),
             self.region.get_start_key(),
             self.region.get_end_key(),
-        )
-        .map_err(|e| EngineError::Other(box_err!(e)))?;
+        )?;
         let data_key = keys::data_key(key);
         self.snap
             .get_value_opt(opts, &data_key)
@@ -226,8 +225,7 @@ where
             self.region.get_id(),
             self.region.get_start_key(),
             self.region.get_end_key(),
-        )
-        .map_err(|e| EngineError::Other(box_err!(e)))?;
+        )?;
         let data_key = keys::data_key(key);
         self.snap
             .get_value_cf_opt(opts, cf, &data_key)
