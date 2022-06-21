@@ -180,11 +180,6 @@ pub fn collapse_prev_rollback(
     reader: &mut SnapshotReader<impl Snapshot>,
     key: &Key,
 ) -> Result<()> {
-    if let Some((commit_ts, write)) = reader.seek_write(key, reader.start_ts)? {
-        if write.write_type == WriteType::Rollback && !write.as_ref().is_protected() {
-            txn.delete_write(key.clone(), commit_ts);
-        }
-    }
     Ok(())
 }
 
