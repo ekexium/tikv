@@ -75,6 +75,7 @@ use pd_client::FeatureGate;
 use raftstore::store::{util::build_key_range, ReadStats, TxnExt, WriteStats};
 use rand::prelude::*;
 use resource_metering::{FutureExt, ResourceTagFactory};
+use stretto::Cache;
 use tikv_kv::SnapshotExt;
 use tikv_util::{
     quota_limiter::QuotaLimiter,
@@ -118,6 +119,11 @@ use crate::{
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Callback<T> = Box<dyn FnOnce(Result<T>) + Send>;
+
+lazy_static! {
+    // at most 1 million keys or 150 MB 
+    pub static ref CACHE: Cache<Key, TimeStamp> = Cache::new(1_000_000, 150 * 1024 * 1024).unwrap();
+}
 
 /// [`Storage`](Storage) implements transactional KV APIs and raw KV APIs on a given [`Engine`].
 /// An [`Engine`] provides low level KV functionality. [`Engine`] has multiple implementations.

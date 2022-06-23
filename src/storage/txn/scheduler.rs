@@ -48,7 +48,7 @@ use resource_metering::{FutureExt, ResourceTagFactory};
 use tikv_kv::{Modify, Snapshot, SnapshotExt, WriteData};
 use tikv_util::{quota_limiter::QuotaLimiter, time::Instant, timer::GLOBAL_TIMER_HANDLE};
 use tracker::{get_tls_tracker_token, set_tls_tracker_token, TrackerToken};
-use txn_types::TimeStamp;
+use txn_types::{Key, TimeStamp};
 
 use crate::{
     server::lock_manager::waiter_manager,
@@ -69,7 +69,7 @@ use crate::{
             Error, ProcessResult,
         },
         types::StorageCallback,
-        DynamicConfigs, Error as StorageError, ErrorInner as StorageErrorInner,
+        DynamicConfigs, Error as StorageError, ErrorInner as StorageErrorInner, CACHE,
     },
 };
 
@@ -897,7 +897,11 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 
         let sched = scheduler.clone();
         let sched_pool = scheduler.get_sched_pool(priority).pool.clone();
-
+        let key_commits: Vec<Key> = to_be_write
+            .modifies
+            .iter()
+            .map(|m| m.key().clone())
+            .collect();
         let (proposed_cb, committed_cb): (Option<ExtCallback>, Option<ExtCallback>) =
             match response_policy {
                 ResponsePolicy::OnApplied => (None, None),
@@ -1054,6 +1058,13 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             sched_pool
                 .spawn(async move {
                     fail_point!("scheduler_async_write_finish");
+
+                    for k in key_commits.into_iter() {
+                        let ts = k.decode_ts().unwrap();
+                        let k = k.truncate_ts().unwrap();
+                        let cost = k.len() as i64;
+                        CACHE.insert(k, ts, cost);
+                    }
 
                     sched.on_write_finished(
                         cid,

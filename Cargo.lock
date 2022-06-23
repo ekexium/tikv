@@ -5307,6 +5307,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9091b6114800a5f2141aee1d1b9d6ca3592ac062dc5decb3764ec5895a47b4eb"
 
 [[package]]
+name = "stretto"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53d29c8dde1b9fafaf180a6e3e0c42c7bdbcba55c36edcfff611ed4454fdda9a"
+dependencies = [
+ "atomic",
+ "crossbeam-channel",
+ "parking_lot 0.12.0",
+ "rand 0.8.3",
+ "twox-hash",
+ "wg",
+]
+
+[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6045,6 +6059,7 @@ dependencies = [
  "slog",
  "slog-global",
  "sst_importer",
+ "stretto",
  "strum",
  "sysinfo",
  "tempfile",
@@ -6616,9 +6631,14 @@ dependencies = [
 
 [[package]]
 name = "twox-hash"
-version = "1.5.0"
+version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bfd5b7557925ce778ff9b9ef90e3ade34c524b5ff10e239c69a42d546d2af56"
+checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
+dependencies = [
+ "cfg-if 1.0.0",
+ "rand 0.8.3",
+ "static_assertions",
+]
 
 [[package]]
 name = "txn_types"
@@ -6893,6 +6913,15 @@ checksum = "ab146130f5f790d45f82aeeb09e55a256573373ec64409fc19a6fb82fb1032ae"
 dependencies = [
  "ring",
  "untrusted",
+]
+
+[[package]]
+name = "wg"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c4f805fab9f31f0295729d0bc4d563bc466223a45326718e842a5d86a8d1c65"
+dependencies = [
+ "parking_lot 0.12.0",
 ]
 
 [[package]]

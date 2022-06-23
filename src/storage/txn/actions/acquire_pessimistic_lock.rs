@@ -4,6 +4,7 @@
 use txn_types::{Key, LockType, OldValue, PessimisticLock, TimeStamp, Value, Write, WriteType};
 
 use crate::storage::{
+    CACHE,
     mvcc::{
         metrics::{MVCC_CONFLICT_COUNTER, MVCC_DUPLICATE_CMD_COUNTER_VEC},
         ErrorInner, MvccTxn, Result as MvccResult, SnapshotReader,
@@ -135,6 +136,22 @@ pub fn acquire_pessimistic_lock<S: Snapshot>(
 
     // Following seek_write read the previous write.
     let (prev_write_loaded, mut prev_write) = (true, None);
+    if let Some(latest_ts) = CACHE.get(&key) {
+        let latest_ts = *latest_ts.value();
+        if latest_ts > for_update_ts {
+            MVCC_CONFLICT_COUNTER
+                .acquire_pessimistic_lock_conflict
+                .inc();
+            return Err(ErrorInner::WriteConflict {
+                start_ts: reader.start_ts,
+                conflict_start_ts: TimeStamp::zero(),
+                conflict_commit_ts: latest_ts,
+                key: key.into_raw()?,
+                primary: primary.to_vec(),
+            }
+            .into());
+        }
+    }
     if let Some((commit_ts, write)) = reader.seek_write(&key, TimeStamp::max())? {
         // Find a previous write.
         if need_old_value {
