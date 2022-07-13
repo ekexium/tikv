@@ -217,6 +217,8 @@ struct SchedulerInner<L: LockManager> {
 
     quota_limiter: Arc<QuotaLimiter>,
     feature_gate: FeatureGate,
+
+    yield_interval: u32,
 }
 
 #[inline]
@@ -372,6 +374,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             resource_tag_factory,
             quota_limiter,
             feature_gate,
+            yield_interval: config.yield_interval,
         });
 
         slow_log!(
@@ -803,18 +806,20 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                 extra_op: task.extra_op,
                 statistics,
                 async_apply_prewrite: self.inner.enable_async_apply_prewrite,
+                yield_interval: self.inner.yield_interval,
             };
             let begin_instant = Instant::now();
             let res = unsafe {
-                with_perf_context::<E, _, _>(tag, || {
+                with_perf_context::<E, _, _>(tag, || async {
                     SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_process_write.observe(
                         start_instant.saturating_elapsed_secs(),
                     );
                     task.cmd
                         .process_write(snapshot, context)
+                        .await
                         .map_err(StorageError::from)
                 })
-            };
+            }.await;
             SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_process_write.observe(
                 start_instant.saturating_elapsed_secs(),
             );

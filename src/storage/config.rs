@@ -59,6 +59,7 @@ pub struct Config {
     pub background_error_recovery_window: ReadableDuration,
     /// Interval to check TTL for all SSTs,
     pub ttl_check_poll_interval: ReadableDuration,
+    pub yield_interval: u32,
     #[online_config(submodule)]
     pub flow_control: FlowControlConfig,
     #[online_config(submodule)]
@@ -90,6 +91,7 @@ impl Default for Config {
             block_cache: BlockCacheConfig::default(),
             io_rate_limit: IORateLimitConfig::default(),
             background_error_recovery_window: ReadableDuration::hours(1),
+            yield_interval: 1,
         }
     }
 }
