@@ -217,6 +217,8 @@ struct SchedulerInner<L: LockManager> {
 
     quota_limiter: Arc<QuotaLimiter>,
     feature_gate: FeatureGate,
+
+    yield_interval: u32,
 }
 
 #[inline]
@@ -372,6 +374,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             resource_tag_factory,
             quota_limiter,
             feature_gate,
+            yield_interval: config.yield_interval,
         });
 
         slow_log!(
@@ -783,25 +786,33 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 
         let deadline = task.cmd.deadline();
         let write_result = {
-            let _guard = sample.observe_cpu();
+            // FIXME
+            // let _guard = sample.observe_cpu();
             let context = WriteContext {
                 lock_mgr: &self.inner.lock_mgr,
                 concurrency_manager: self.inner.concurrency_manager.clone(),
                 extra_op: task.extra_op,
                 statistics,
                 async_apply_prewrite: self.inner.enable_async_apply_prewrite,
+                yield_interval: self.inner.yield_interval,
             };
             let begin_instant = Instant::now();
             let res = unsafe {
-                with_perf_context::<E, _, _>(tag, || {
+                with_perf_context::<E, _, _>(tag, || async {
                     task.cmd
                         .process_write(snapshot, context)
+                        .await
                         .map_err(StorageError::from)
                 })
-            };
+            }
+            .await;
             SCHED_PROCESSING_READ_HISTOGRAM_STATIC
                 .get(tag)
                 .observe(begin_instant.saturating_elapsed_secs());
+            // FIXME: don't use this way
+            if sample.cpu_limit_enabled() {
+                sample.add_cpu_time(begin_instant.saturating_elapsed());
+            }
             res
         };
 
