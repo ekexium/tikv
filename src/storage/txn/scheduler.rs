@@ -774,8 +774,6 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         let priority = task.cmd.priority();
         let ts = task.cmd.ts();
         let scheduler = self.clone();
-        let quota_limiter = self.inner.quota_limiter.clone();
-        let mut sample = quota_limiter.new_sample();
         let pessimistic_lock_mode = self.pessimistic_lock_mode();
         let pipelined =
             task.cmd.can_be_pipelined() && pessimistic_lock_mode == PessimisticLockMode::Pipelined;
@@ -783,7 +781,6 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 
         let deadline = task.cmd.deadline();
         let write_result = {
-            let _guard = sample.observe_cpu();
             let context = WriteContext {
                 lock_mgr: &self.inner.lock_mgr,
                 concurrency_manager: self.inner.concurrency_manager.clone(),
@@ -805,20 +802,9 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             res
         };
 
-        if write_result.is_ok() {
-            // TODO: write bytes can be a bit inaccurate due to error requests or in-memory pessimistic locks.
-            sample.add_write_bytes(write_bytes);
-        }
         let read_bytes = statistics.cf_statistics(CF_DEFAULT).flow_stats.read_bytes
             + statistics.cf_statistics(CF_LOCK).flow_stats.read_bytes
             + statistics.cf_statistics(CF_WRITE).flow_stats.read_bytes;
-        sample.add_read_bytes(read_bytes);
-        let quota_delay = quota_limiter.consume_sample(sample, true).await;
-        if !quota_delay.is_zero() {
-            TXN_COMMAND_THROTTLE_TIME_COUNTER_VEC_STATIC
-                .get(tag)
-                .inc_by(quota_delay.as_micros() as u64);
-        }
 
         let WriteResult {
             ctx,
