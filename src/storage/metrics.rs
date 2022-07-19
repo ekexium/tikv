@@ -268,6 +268,10 @@ make_auto_flush_static_metric! {
     pub struct InMemoryPessimisticLockingCounter: LocalIntCounter {
         "result" => InMemoryPessimisticLockingResult,
     }
+
+    pub struct WriteInMemoryPessimisticLockHistogramVec: LocalHistogram {
+        "type" => CommandKind,
+    }
 }
 
 impl From<ServerGcKeysCF> for GcKeysCF {
@@ -572,4 +576,11 @@ lazy_static! {
     .unwrap();
     pub static ref IN_MEMORY_PESSIMISTIC_LOCKING_COUNTER_STATIC: InMemoryPessimisticLockingCounter =
         auto_flush_from!(IN_MEMORY_PESSIMISTIC_LOCKING_COUNTER, InMemoryPessimisticLockingCounter);
+
+    pub static ref WRITE_IN_MEMORY_PESSIMISTIC_LOCK_DURATION: Histogram = register_histogram!(
+        "tikv_write_in_memory_pessimistic_lock_duration_seconds",
+        "The histogram of the duration of writing in-memory pessimistic locks",
+        exponential_buckets(1e-6f64, 4f64, 10).unwrap() // 1us ~ 262ms)
+    )
+    .unwrap();
 }

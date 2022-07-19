@@ -1106,7 +1106,10 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             Some(txn_ext) => txn_ext,
             None => return false,
         };
+        let before_locking = Instant::now();
         let mut pessimistic_locks = txn_ext.pessimistic_locks.write();
+        WRITE_IN_MEMORY_PESSIMISTIC_LOCK_DURATION
+            .observe(before_locking.saturating_elapsed().as_secs_f64());
         // When not writable, it only means we cannot write locks to the in-memory lock table,
         // but it is still possible for the region to propose request.
         // When term or epoch version has changed, the request must fail. To be simple, here we just
