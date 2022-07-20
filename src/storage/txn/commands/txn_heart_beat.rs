@@ -1,6 +1,5 @@
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
-use async_trait::async_trait;
 // #[PerformanceCriticalPath]
 use txn_types::{Key, TimeStamp};
 
@@ -47,9 +46,8 @@ impl CommandExt for TxnHeartBeat {
     gen_lock!(primary_key);
 }
 
-#[async_trait]
-impl<S: Snapshot, L: LockManager + std::marker::Send + std::marker::Sync> WriteCommand<S, L> for TxnHeartBeat {
-    async fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult> where S: 'async_trait {
+impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for TxnHeartBeat {
+    fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult> {
         // TxnHeartBeat never remove locks. No need to wake up waiters.
         let mut txn = MvccTxn::new(self.start_ts, context.concurrency_manager);
         let mut reader = ReaderWithStats::new(

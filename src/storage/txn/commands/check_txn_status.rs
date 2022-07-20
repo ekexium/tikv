@@ -1,6 +1,5 @@
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
-use async_trait::async_trait;
 // #[PerformanceCriticalPath]
 use txn_types::{Key, TimeStamp};
 
@@ -64,8 +63,7 @@ impl CommandExt for CheckTxnStatus {
     gen_lock!(primary_key);
 }
 
-#[async_trait]
-impl<S: Snapshot, L: LockManager + std::marker::Send + std::marker::Sync> WriteCommand<S, L> for CheckTxnStatus {
+impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for CheckTxnStatus {
     /// checks whether a transaction has expired its primary lock's TTL, rollback the
     /// transaction if expired, or update the transaction's min_commit_ts according to the metadata
     /// in the primary lock.
@@ -73,7 +71,7 @@ impl<S: Snapshot, L: LockManager + std::marker::Send + std::marker::Sync> WriteC
     /// situation, `self.start_ts` is T2's `start_ts`, `caller_start_ts` is T1's `start_ts`, and
     /// the `current_ts` is literally the timestamp when this function is invoked; it may not be
     /// accurate.
-    async fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult> where S: 'async_trait {
+    fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult> {
         let mut new_max_ts = self.lock_ts;
         if !self.current_ts.is_max() && self.current_ts > new_max_ts {
             new_max_ts = self.current_ts;

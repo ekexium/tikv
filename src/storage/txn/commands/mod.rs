@@ -30,7 +30,6 @@ use std::{
 };
 
 pub use acquire_pessimistic_lock::AcquirePessimisticLock;
-use async_trait::async_trait;
 pub use atomic_store::RawAtomicStore;
 pub use check_secondary_locks::CheckSecondaryLocks;
 pub use check_txn_status::CheckTxnStatus;
@@ -508,7 +507,6 @@ pub struct WriteContext<'a, L: LockManager> {
     pub extra_op: ExtraOp,
     pub statistics: &'a mut Statistics,
     pub async_apply_prewrite: bool,
-    pub yield_interval: u32,
 }
 
 pub struct ReaderWithStats<'a, S: Snapshot> {
@@ -604,27 +602,27 @@ impl Command {
         }
     }
 
-    pub(crate) async fn process_write<S: Snapshot, L: LockManager>(
+    pub(crate) fn process_write<S: Snapshot, L: LockManager>(
         self,
         snapshot: S,
         context: WriteContext<'_, L>,
     ) -> Result<WriteResult> {
         match self {
-            Command::Prewrite(t) => t.process_write(snapshot, context).await,
-            Command::PrewritePessimistic(t) => t.process_write(snapshot, context).await,
-            Command::AcquirePessimisticLock(t) => t.process_write(snapshot, context).await,
-            Command::Commit(t) => t.process_write(snapshot, context).await,
-            Command::Cleanup(t) => t.process_write(snapshot, context).await,
-            Command::Rollback(t) => t.process_write(snapshot, context).await,
-            Command::PessimisticRollback(t) => t.process_write(snapshot, context).await,
-            Command::ResolveLock(t) => t.process_write(snapshot, context).await,
-            Command::ResolveLockLite(t) => t.process_write(snapshot, context).await,
-            Command::TxnHeartBeat(t) => t.process_write(snapshot, context).await,
-            Command::CheckTxnStatus(t) => t.process_write(snapshot, context).await,
-            Command::CheckSecondaryLocks(t) => t.process_write(snapshot, context).await,
-            Command::Pause(t) => t.process_write(snapshot, context).await,
-            Command::RawCompareAndSwap(t) => t.process_write(snapshot, context).await,
-            Command::RawAtomicStore(t) => t.process_write(snapshot, context).await,
+            Command::Prewrite(t) => t.process_write(snapshot, context),
+            Command::PrewritePessimistic(t) => t.process_write(snapshot, context),
+            Command::AcquirePessimisticLock(t) => t.process_write(snapshot, context),
+            Command::Commit(t) => t.process_write(snapshot, context),
+            Command::Cleanup(t) => t.process_write(snapshot, context),
+            Command::Rollback(t) => t.process_write(snapshot, context),
+            Command::PessimisticRollback(t) => t.process_write(snapshot, context),
+            Command::ResolveLock(t) => t.process_write(snapshot, context),
+            Command::ResolveLockLite(t) => t.process_write(snapshot, context),
+            Command::TxnHeartBeat(t) => t.process_write(snapshot, context),
+            Command::CheckTxnStatus(t) => t.process_write(snapshot, context),
+            Command::CheckSecondaryLocks(t) => t.process_write(snapshot, context),
+            Command::Pause(t) => t.process_write(snapshot, context),
+            Command::RawCompareAndSwap(t) => t.process_write(snapshot, context),
+            Command::RawAtomicStore(t) => t.process_write(snapshot, context),
             _ => panic!("unsupported write command"),
         }
     }
@@ -683,16 +681,6 @@ impl Command {
     pub fn deadline(&self) -> Deadline {
         self.command_ext().deadline()
     }
-
-    pub fn fast(&self) -> bool {
-        match self {
-            Command::Prewrite(p) => p.mutations.len() <= 5,
-            Command::AcquirePessimisticLock(a) => a.keys.len() <= 5,
-            Command::PrewritePessimistic(p) => p.mutations.len() <= 5,
-            Command::Commit(c) => c.keys.len() <= 5,
-            _ => true,
-        }
-    }
 }
 
 impl Display for Command {
@@ -713,9 +701,8 @@ pub trait ReadCommand<S: Snapshot>: CommandExt {
 }
 
 /// Commands that need to modify the database during execution will implement this trait.
-#[async_trait]
 pub trait WriteCommand<S: Snapshot, L: LockManager>: CommandExt {
-    async fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult> where S: 'async_trait;
+    fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult>;
 }
 
 #[cfg(test)]
@@ -731,7 +718,7 @@ pub mod test_util {
 
     // Some utils for tests that may be used in multiple source code files.
 
-    pub async fn prewrite_command<E: Engine>(
+    pub fn prewrite_command<E: Engine>(
         engine: &E,
         cm: ConcurrencyManager,
         statistics: &mut Statistics,
@@ -745,7 +732,7 @@ pub mod test_util {
             statistics,
             async_apply_prewrite: false,
         };
-        let ret = cmd.cmd.process_write(snap, context).await?;
+        let ret = cmd.cmd.process_write(snap, context)?;
         let res = match ret.pr {
             ProcessResult::PrewriteResult {
                 result: PrewriteResult { locks, .. },
@@ -858,7 +845,7 @@ pub mod test_util {
         prewrite_command(engine, cm, statistics, cmd)
     }
 
-    pub async fn commit<E: Engine>(
+    pub fn commit<E: Engine>(
         engine: &E,
         statistics: &mut Statistics,
         keys: Vec<Key>,
@@ -883,13 +870,13 @@ pub mod test_util {
             async_apply_prewrite: false,
         };
 
-        let ret = cmd.cmd.process_write(snap, context).await?;
+        let ret = cmd.cmd.process_write(snap, context)?;
         let ctx = Context::default();
         engine.write(&ctx, ret.to_be_write).unwrap();
         Ok(())
     }
 
-    pub async fn rollback<E: Engine>(
+    pub fn rollback<E: Engine>(
         engine: &E,
         statistics: &mut Statistics,
         keys: Vec<Key>,
@@ -907,7 +894,7 @@ pub mod test_util {
             async_apply_prewrite: false,
         };
 
-        let ret = cmd.cmd.process_write(snap, context).await?;
+        let ret = cmd.cmd.process_write(snap, context)?;
         let ctx = Context::default();
         engine.write(&ctx, ret.to_be_write).unwrap();
         Ok(())

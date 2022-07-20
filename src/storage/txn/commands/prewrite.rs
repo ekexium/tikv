@@ -8,12 +8,10 @@
 
 use std::mem;
 
-use async_trait::async_trait;
 use engine_traits::CF_WRITE;
 use kvproto::kvrpcpb::{AssertionLevel, ExtraOp};
 use tikv_kv::SnapshotExt;
 use txn_types::{Key, Mutation, OldValue, OldValues, TimeStamp, TxnExtra, Write, WriteType};
-use yatp::task::future::reschedule;
 
 use super::ReaderWithStats;
 use crate::storage::{
@@ -241,15 +239,9 @@ impl CommandExt for Prewrite {
     gen_lock!(mutations: multiple(|x| x.key()));
 }
 
-#[async_trait]
-impl<S: Snapshot, L: LockManager + std::marker::Send + std::marker::Sync> WriteCommand<S, L>
-    for Prewrite
-{
-    async fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult>
-    where
-        S: 'async_trait,
-    {
-        self.into_prewriter().process_write(snapshot, context).await
+impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for Prewrite {
+    fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult> {
+        self.into_prewriter().process_write(snapshot, context)
     }
 }
 
@@ -412,15 +404,9 @@ impl CommandExt for PrewritePessimistic {
     gen_lock!(mutations: multiple(|(x, _)| x.key()));
 }
 
-#[async_trait]
-impl<S: Snapshot, L: LockManager + std::marker::Send + std::marker::Sync> WriteCommand<S, L>
-    for PrewritePessimistic
-{
-    async fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult>
-    where
-        S: 'async_trait,
-    {
-        self.into_prewriter().process_write(snapshot, context).await
+impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for PrewritePessimistic {
+    fn process_write(self, snapshot: S, context: WriteContext<'_, L>) -> Result<WriteResult> {
+        self.into_prewriter().process_write(snapshot, context)
     }
 }
 
@@ -444,7 +430,7 @@ struct Prewriter<K: PrewriteKind> {
 
 impl<K: PrewriteKind> Prewriter<K> {
     /// Entry point for handling a prewrite by Prewriter.
-    async fn process_write(
+    fn process_write(
         mut self,
         snapshot: impl Snapshot,
         mut context: WriteContext<'_, impl LockManager>,
@@ -461,14 +447,7 @@ impl<K: PrewriteKind> Prewriter<K> {
         // Set extra op here for getting the write record when check write conflict in prewrite.
 
         let rows = self.mutations.len();
-        let res = self
-            .prewrite(
-                &mut txn,
-                &mut reader,
-                context.extra_op,
-                context.yield_interval,
-            )
-            .await;
+        let res = self.prewrite(&mut txn, &mut reader, context.extra_op);
         let (locks, final_min_commit_ts) = res?;
 
         Ok(self.write_result(
@@ -500,12 +479,11 @@ impl<K: PrewriteKind> Prewriter<K> {
     /// The core part of the prewrite action. In the abstract, this method iterates over the mutations
     /// in the prewrite and prewrites each one. It keeps track of any locks encountered and (if it's
     /// an async commit transaction) the min_commit_ts, these are returned by the method.
-    async fn prewrite(
+    fn prewrite(
         &mut self,
         txn: &mut MvccTxn,
         reader: &mut SnapshotReader<impl Snapshot>,
         extra_op: ExtraOp,
-        yield_interval: u32,
     ) -> Result<(Vec<std::result::Result<(), StorageError>>, TimeStamp)> {
         let commit_kind = match (&self.secondary_keys, self.try_one_pc) {
             (_, true) => CommitKind::OnePc(self.max_commit_ts),
@@ -566,12 +544,7 @@ impl<K: PrewriteKind> Prewriter<K> {
         // If there are other errors, return other error prior to `AssertionFailed`.
         let mut assertion_failure = None;
 
-        let mut yield_count = 0;
         for m in mem::take(&mut self.mutations) {
-            yield_count += 1;
-            if yield_interval > 0 && yield_count % yield_interval == 0 {
-                reschedule().await;
-            }
             let is_pessimistic_lock = m.is_pessimistic_lock();
             let m = m.into_mutation();
             let key = m.key().clone();
@@ -1448,8 +1421,8 @@ mod tests {
         assert!(!must_locked(&engine, k2, 20).use_async_commit);
     }
 
-    #[tokio::test]
-    async fn test_out_of_sync_max_ts() {
+    #[test]
+    fn test_out_of_sync_max_ts() {
         use engine_test::kv::KvTestEngineIterator;
         use engine_traits::{IterOptions, ReadOptions};
         use kvproto::kvrpcpb::ExtraOp;
@@ -1513,10 +1486,7 @@ mod tests {
 
         // 2pc should be ok
         let cmd = Prewrite::with_defaults(vec![], vec![1, 2, 3], 10.into());
-        cmd.cmd
-            .process_write(MockSnapshot, context!())
-            .await
-            .unwrap();
+        cmd.cmd.process_write(MockSnapshot, context!()).unwrap();
         // But 1pc should return an error
         let cmd = Prewrite::with_1pc(vec![], vec![1, 2, 3], 10.into(), 20.into());
         assert_max_ts_err!(cmd.cmd.process_write(MockSnapshot, context!()));
@@ -1529,10 +1499,7 @@ mod tests {
 
         // And the same for pessimistic prewrites.
         let cmd = PrewritePessimistic::with_defaults(vec![], vec![1, 2, 3], 10.into(), 15.into());
-        cmd.cmd
-            .process_write(MockSnapshot, context!())
-            .await
-            .unwrap();
+        cmd.cmd.process_write(MockSnapshot, context!()).unwrap();
         let cmd =
             PrewritePessimistic::with_1pc(vec![], vec![1, 2, 3], 10.into(), 15.into(), 20.into());
         assert_max_ts_err!(cmd.cmd.process_write(MockSnapshot, context!()));
@@ -1545,8 +1512,8 @@ mod tests {
     }
 
     // this test shows which stage in raft can we return the response
-    #[tokio::test]
-    async fn test_response_stage() {
+    #[test]
+    fn test_response_stage() {
         let cm = ConcurrencyManager::new(42.into());
         let start_ts = TimeStamp::new(10);
         let keys = [b"k1", b"k2"];
@@ -1673,7 +1640,7 @@ mod tests {
             };
             let engine = TestEngineBuilder::new().build().unwrap();
             let snap = engine.snapshot(Default::default()).unwrap();
-            let result = cmd.cmd.process_write(snap, context).await.unwrap();
+            let result = cmd.cmd.process_write(snap, context).unwrap();
             assert_eq!(result.response_policy, case.expected);
         }
     }
@@ -1784,7 +1751,7 @@ mod tests {
             async_apply_prewrite: false,
         };
         let snap = engine.snapshot(Default::default()).unwrap();
-        let result = cmd.cmd.process_write(snap, context).await.unwrap();
+        let result = cmd.cmd.process_write(snap, context).unwrap();
         assert!(result.to_be_write.modifies.is_empty()); // should not make real modifies
         assert!(result.lock_guards.is_empty());
         match result.pr {
@@ -1811,7 +1778,7 @@ mod tests {
             async_apply_prewrite: false,
         };
         let snap = engine.snapshot(Default::default()).unwrap();
-        let result = cmd.cmd.process_write(snap, context).await.unwrap();
+        let result = cmd.cmd.process_write(snap, context).unwrap();
         assert!(result.to_be_write.modifies.is_empty()); // should not make real modifies
         assert!(result.lock_guards.is_empty());
         match result.pr {
@@ -1886,7 +1853,7 @@ mod tests {
             async_apply_prewrite: false,
         };
         let snap = engine.snapshot(Default::default()).unwrap();
-        let result = cmd.cmd.process_write(snap, context).await.unwrap();
+        let result = cmd.cmd.process_write(snap, context).unwrap();
         assert!(result.to_be_write.modifies.is_empty()); // should not make real modifies
         assert!(result.lock_guards.is_empty());
         match result.pr {
@@ -1914,7 +1881,7 @@ mod tests {
             async_apply_prewrite: false,
         };
         let snap = engine.snapshot(Default::default()).unwrap();
-        let result = cmd.cmd.process_write(snap, context).await.unwrap();
+        let result = cmd.cmd.process_write(snap, context).unwrap();
         assert!(result.to_be_write.modifies.is_empty()); // should not make real modifies
         assert!(result.lock_guards.is_empty());
         match result.pr {
@@ -2117,7 +2084,7 @@ mod tests {
             async_apply_prewrite: false,
         };
         let snap = engine.snapshot(Default::default()).unwrap();
-        assert!(prewrite_cmd.cmd.process_write(snap, context).await.is_err());
+        assert!(prewrite_cmd.cmd.process_write(snap, context).is_err());
 
         // Test the pessimistic lock is not found path.
         must_acquire_pessimistic_lock(&engine, k1, v1, 10, 10);
@@ -2137,7 +2104,7 @@ mod tests {
             async_apply_prewrite: false,
         };
         let snap = engine.snapshot(Default::default()).unwrap();
-        assert!(prewrite_cmd.cmd.process_write(snap, context).await.is_err());
+        assert!(prewrite_cmd.cmd.process_write(snap, context).is_err());
     }
 
     #[test]
@@ -2337,7 +2304,7 @@ mod tests {
             async_apply_prewrite: false,
         };
         let snap = engine.snapshot(Default::default()).unwrap();
-        let res = prewrite_cmd.cmd.process_write(snap, context).await.unwrap();
+        let res = prewrite_cmd.cmd.process_write(snap, context).unwrap();
         match res.pr {
             ProcessResult::PrewriteResult { result } => {
                 assert!(result.locks.is_empty(), "{:?}", result);

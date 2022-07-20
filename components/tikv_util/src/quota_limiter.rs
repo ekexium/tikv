@@ -110,12 +110,8 @@ impl<'a> Sample {
         }
     }
 
-    pub fn add_cpu_time(&mut self, time: Duration) {
+    fn add_cpu_time(&mut self, time: Duration) {
         self.cpu_time += time;
-    }
-
-    pub fn cpu_limit_enabled(&self) -> bool {
-        self.enable_cpu_limit
     }
 }
 
