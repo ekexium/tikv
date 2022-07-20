@@ -489,8 +489,10 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
     }
 
     // pub for test
-    pub fn get_sched_pool(&self, priority: CommandPri) -> &SchedPool {
-        if priority == CommandPri::High {
+    pub fn get_sched_pool(&self, is_large: bool, priority: CommandPri) -> &SchedPool {
+        if is_large {
+            &self.inner.high_priority_pool
+        } else if priority == CommandPri::High {
             &self.inner.high_priority_pool
         } else {
             &self.inner.worker_pool
@@ -501,7 +503,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
     fn execute(&self, mut task: Task, start_instant: Instant) {
         set_tls_tracker_token(task.tracker);
         let sched = self.clone();
-        self.get_sched_pool(task.cmd.priority())
+        self.get_sched_pool(task.cmd.is_large(), task.cmd.priority())
             .pool
             .spawn(async move {
                 fail_point!("scheduler_start_execute");
@@ -545,9 +547,10 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                             "cid" => task.cid, "term" => ?term, "extra_op" => ?extra_op,
                             "trakcer" => ?task.tracker
                         );
-                        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_process.observe(
-                            start_instant.saturating_elapsed_secs(),
-                        );
+                        SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                            .get(tag)
+                            .before_process
+                            .observe(start_instant.saturating_elapsed_secs());
                         sched.process(snapshot, task, start_instant).await;
                     }
                     Err(err) => {
@@ -646,20 +649,23 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                 SCHED_STAGE_COUNTER_VEC.get(tag).next_cmd.inc();
                 self.schedule_command(cmd, cb);
             } else {
-                SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_cb.observe(
-                    start_instant.saturating_elapsed_secs(),
-                );
+                SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                    .get(tag)
+                    .before_cb
+                    .observe(start_instant.saturating_elapsed_secs());
                 cb.execute(pr);
-                SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_cb.observe(
-                    start_instant.saturating_elapsed_secs(),
-                ); 
+                SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                    .get(tag)
+                    .after_cb
+                    .observe(start_instant.saturating_elapsed_secs());
             }
         } else {
             assert!(pipelined || async_apply_prewrite);
         }
-        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_release_lock.observe(
-            start_instant.saturating_elapsed_secs(),
-        );
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+            .get(tag)
+            .before_release_lock
+            .observe(start_instant.saturating_elapsed_secs());
         self.release_lock(&tctx.lock, cid);
     }
 
@@ -739,11 +745,13 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             if task.cmd.readonly() {
                 self.process_read(snapshot, task, &mut statistics);
             } else {
-                self.process_write(snapshot, task, &mut statistics, start_instant).await;
+                self.process_write(snapshot, task, &mut statistics, start_instant)
+                    .await;
             };
-            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_process.observe(
-                start_instant.saturating_elapsed_secs(),
-            );
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                .get(tag)
+                .after_process
+                .observe(start_instant.saturating_elapsed_secs());
             tls_collect_scan_details(tag.get_str(), &statistics);
             let elapsed = timer.saturating_elapsed();
             slow_log!(
@@ -782,12 +790,19 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 
     /// Processes a write command within a worker thread, then posts either a `WriteFinished`
     /// message if successful or a `FinishedWithErr` message back to the `Scheduler`.
-    async fn process_write(self, snapshot: E::Snap, task: Task, statistics: &mut Statistics, start_instant: Instant) {
+    async fn process_write(
+        self,
+        snapshot: E::Snap,
+        task: Task,
+        statistics: &mut Statistics,
+        start_instant: Instant,
+    ) {
         fail_point!("txn_before_process_write");
         let write_bytes = task.cmd.write_bytes();
         let tag = task.cmd.tag();
         let cid = task.cid;
         let priority = task.cmd.priority();
+        let is_large = task.cmd.is_large();
         let ts = task.cmd.ts();
         let scheduler = self.clone();
         let pessimistic_lock_mode = self.pessimistic_lock_mode();
@@ -807,17 +822,19 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             let begin_instant = Instant::now();
             let res = unsafe {
                 with_perf_context::<E, _, _>(tag, || {
-                    SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_process_write.observe(
-                        start_instant.saturating_elapsed_secs(),
-                    );
+                    SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                        .get(tag)
+                        .before_process_write
+                        .observe(start_instant.saturating_elapsed_secs());
                     task.cmd
                         .process_write(snapshot, context)
                         .map_err(StorageError::from)
                 })
             };
-            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_process_write.observe(
-                start_instant.saturating_elapsed_secs(),
-            );
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                .get(tag)
+                .after_process_write
+                .observe(start_instant.saturating_elapsed_secs());
             SCHED_PROCESSING_READ_HISTOGRAM_STATIC
                 .get(tag)
                 .observe(begin_instant.saturating_elapsed_secs());
@@ -873,13 +890,23 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 
         let mut pr = Some(pr);
         if to_be_write.modifies.is_empty() {
-            scheduler.on_write_finished(cid, pr, Ok(()), lock_guards, false, false, tag, start_instant);
+            scheduler.on_write_finished(
+                cid,
+                pr,
+                Ok(()),
+                lock_guards,
+                false,
+                false,
+                tag,
+                start_instant,
+            );
             return;
         }
 
-        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_try_write_in_mem_lock.observe(
-            start_instant.saturating_elapsed_secs(),
-        );
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+            .get(tag)
+            .before_try_write_in_mem_lock
+            .observe(start_instant.saturating_elapsed_secs());
         if tag == CommandKind::acquire_pessimistic_lock
             && pessimistic_lock_mode == PessimisticLockMode::InMemory
             && self.try_write_in_memory_pessimistic_locks(
@@ -896,18 +923,30 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                     engine.schedule_txn_extra(to_be_write.extra);
                 })
             }
-            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_try_write_in_mem_lock.observe(
-                start_instant.saturating_elapsed_secs(),
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                .get(tag)
+                .after_try_write_in_mem_lock
+                .observe(start_instant.saturating_elapsed_secs());
+            scheduler.on_write_finished(
+                cid,
+                pr,
+                Ok(()),
+                lock_guards,
+                false,
+                false,
+                tag,
+                start_instant,
             );
-            scheduler.on_write_finished(cid, pr, Ok(()), lock_guards, false, false, tag, start_instant);
-            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_in_mem_lock_write_finish.observe(
-                start_instant.saturating_elapsed_secs(),
-            );
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+                .get(tag)
+                .after_in_mem_lock_write_finish
+                .observe(start_instant.saturating_elapsed_secs());
             return;
         }
-        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_write.observe(
-            start_instant.saturating_elapsed_secs(),
-        );
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+            .get(tag)
+            .before_write
+            .observe(start_instant.saturating_elapsed_secs());
         let mut is_async_apply_prewrite = false;
         let write_size = to_be_write.size();
         if ctx.get_disk_full_opt() == DiskFullOpt::AllowedOnAlmostFull {
@@ -916,7 +955,10 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         to_be_write.deadline = Some(deadline);
 
         let sched = scheduler.clone();
-        let sched_pool = scheduler.get_sched_pool(priority).pool.clone();
+        let sched_pool = scheduler
+            .get_sched_pool(is_large, priority)
+            .pool
+            .clone();
 
         let (proposed_cb, committed_cb): (Option<ExtCallback>, Option<ExtCallback>) =
             match response_policy {
@@ -1010,9 +1052,10 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                 SCHED_THROTTLE_TIME.observe(start.saturating_elapsed_secs());
             }
         }
-        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_overwrite_lock.observe(
-            start_instant.saturating_elapsed_secs(),
-        );
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC
+            .get(tag)
+            .before_overwrite_lock
+            .observe(start_instant.saturating_elapsed_secs());
         let (version, term) = (ctx.get_region_epoch().get_version(), ctx.get_term());
         // Mutations on the lock CF should overwrite the memory locks.
         // We only set a deleted flag here, and the lock will be finally removed when it finishes
@@ -1085,7 +1128,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                         pipelined,
                         is_async_apply_prewrite,
                         tag,
-                        start_instant
+                        start_instant,
                     );
                     KV_COMMAND_KEYWRITE_HISTOGRAM_VEC
                         .get(tag)
@@ -1435,7 +1478,7 @@ mod tests {
         // Spawn a task that sleeps for 500ms to occupy the pool. The next request
         // cannot run within 500ms.
         scheduler
-            .get_sched_pool(CommandPri::Normal)
+            .get_sched_pool(false, CommandPri::Normal)
             .pool
             .spawn(async { thread::sleep(Duration::from_millis(500)) })
             .unwrap();

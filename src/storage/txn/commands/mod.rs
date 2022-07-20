@@ -681,6 +681,16 @@ impl Command {
     pub fn deadline(&self) -> Deadline {
         self.command_ext().deadline()
     }
+
+    pub(crate) fn is_large(&self) -> bool {
+        if let Command::Prewrite(t) = self {
+            t.mutations.len() > 5
+        } else if let Command::PrewritePessimistic(t) = self {
+            t.mutations.len() > 5
+        } else {
+            false
+        }
+    }
 }
 
 impl Display for Command {

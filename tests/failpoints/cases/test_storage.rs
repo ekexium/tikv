@@ -313,7 +313,7 @@ fn test_scale_scheduler_pool() {
             .unwrap();
         assert_eq!(
             scheduler
-                .get_sched_pool(CommandPri::Normal)
+                .get_sched_pool(false, CommandPri::Normal)
                 .pool
                 .get_pool_size(),
             size
