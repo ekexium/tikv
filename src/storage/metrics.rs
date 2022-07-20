@@ -176,6 +176,21 @@ make_auto_flush_static_metric! {
         async_apply_prewrite_finish,
     }
 
+    pub label_enum CommandStage {
+        before_process,
+        after_process,
+        before_process_write,
+        after_process_write,
+        before_try_write_in_mem_lock,
+        after_try_write_in_mem_lock,
+        after_in_mem_lock_write_finish,
+        before_cb,
+        before_release_lock,
+        before_write,
+        before_overwrite_lock,
+        after_cb
+    }
+
     pub label_enum CommandPriority {
         low,
         normal,
@@ -271,6 +286,11 @@ make_auto_flush_static_metric! {
 
     pub struct WriteInMemoryPessimisticLockHistogramVec: LocalHistogram {
         "type" => CommandKind,
+    }
+
+    pub struct SchedulerWaterfallHistogramVec: LocalHistogram {
+        "type" => CommandKind,
+        "stage" => CommandStage,
     }
 }
 
@@ -583,4 +603,14 @@ lazy_static! {
         exponential_buckets(1e-6f64, 4f64, 10).unwrap() // 1us ~ 262ms)
     )
     .unwrap();
+
+    pub static ref SCHEDULER_WATERFALL_HISTOGRAM_VEC: HistogramVec = register_histogram_vec!(
+        "tikv_scheduler_waterfall",
+        "The histogram of the duration of scheduler waterfall",
+        &["type", "stage"],
+        exponential_buckets(1e-8f64, 4f64, 13).unwrap() // 10ns ~ 167ms)
+    ).unwrap();
+
+    pub static ref SCHEDULER_WATERFALL_HISTOGRAM_STATIC: SchedulerWaterfallHistogramVec =
+        auto_flush_from!(SCHEDULER_WATERFALL_HISTOGRAM_VEC, SchedulerWaterfallHistogramVec);
 }

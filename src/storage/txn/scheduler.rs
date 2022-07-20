@@ -424,6 +424,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             .inc();
 
         let mut task_slot = self.inner.get_task_slot(cid);
+        let start_instant = Instant::now();
         let tctx = task_slot.entry(cid).or_insert_with(|| {
             self.inner
                 .new_task_context(Task::new(cid, tracker, cmd), callback)
@@ -434,7 +435,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             tctx.on_schedule();
             let task = tctx.task.take().unwrap();
             drop(task_slot);
-            self.execute(task);
+            self.execute(task, start_instant);
             return;
         }
         // Check deadline in background.
@@ -469,7 +470,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         match self.inner.acquire_lock_on_wakeup(cid) {
             Ok(Some(task)) => {
                 fail_point!("txn_scheduler_try_to_wake_up");
-                self.execute(task);
+                self.execute(task, Instant::now());
             }
             Ok(None) => {}
             Err(err) => {
@@ -497,7 +498,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
     }
 
     /// Executes the task in the sched pool.
-    fn execute(&self, mut task: Task) {
+    fn execute(&self, mut task: Task, start_instant: Instant) {
         set_tls_tracker_token(task.tracker);
         let sched = self.clone();
         self.get_sched_pool(task.cmd.priority())
@@ -544,7 +545,10 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                             "cid" => task.cid, "term" => ?term, "extra_op" => ?extra_op,
                             "trakcer" => ?task.tracker
                         );
-                        sched.process(snapshot, task).await;
+                        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_process.observe(
+                            start_instant.saturating_elapsed_secs(),
+                        );
+                        sched.process(snapshot, task, start_instant).await;
                     }
                     Err(err) => {
                         SCHED_STAGE_COUNTER_VEC.get(tag).snapshot_err.inc();
@@ -606,6 +610,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         pipelined: bool,
         async_apply_prewrite: bool,
         tag: CommandKind,
+        start_instant: Instant,
     ) {
         // TODO: Does async apply prewrite worth a special metric here?
         if pipelined {
@@ -641,12 +646,20 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                 SCHED_STAGE_COUNTER_VEC.get(tag).next_cmd.inc();
                 self.schedule_command(cmd, cb);
             } else {
+                SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_cb.observe(
+                    start_instant.saturating_elapsed_secs(),
+                );
                 cb.execute(pr);
+                SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_cb.observe(
+                    start_instant.saturating_elapsed_secs(),
+                ); 
             }
         } else {
             assert!(pipelined || async_apply_prewrite);
         }
-
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_release_lock.observe(
+            start_instant.saturating_elapsed_secs(),
+        );
         self.release_lock(&tctx.lock, cid);
     }
 
@@ -690,7 +703,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
     }
 
     /// Process the task in the current thread.
-    async fn process(self, snapshot: E::Snap, task: Task) {
+    async fn process(self, snapshot: E::Snap, task: Task, start_instant: Instant) {
         if self.check_task_deadline_exceeded(&task) {
             return;
         }
@@ -726,8 +739,11 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             if task.cmd.readonly() {
                 self.process_read(snapshot, task, &mut statistics);
             } else {
-                self.process_write(snapshot, task, &mut statistics).await;
+                self.process_write(snapshot, task, &mut statistics, start_instant).await;
             };
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_process.observe(
+                start_instant.saturating_elapsed_secs(),
+            );
             tls_collect_scan_details(tag.get_str(), &statistics);
             let elapsed = timer.saturating_elapsed();
             slow_log!(
@@ -766,7 +782,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 
     /// Processes a write command within a worker thread, then posts either a `WriteFinished`
     /// message if successful or a `FinishedWithErr` message back to the `Scheduler`.
-    async fn process_write(self, snapshot: E::Snap, task: Task, statistics: &mut Statistics) {
+    async fn process_write(self, snapshot: E::Snap, task: Task, statistics: &mut Statistics, start_instant: Instant) {
         fail_point!("txn_before_process_write");
         let write_bytes = task.cmd.write_bytes();
         let tag = task.cmd.tag();
@@ -791,11 +807,17 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             let begin_instant = Instant::now();
             let res = unsafe {
                 with_perf_context::<E, _, _>(tag, || {
+                    SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_process_write.observe(
+                        start_instant.saturating_elapsed_secs(),
+                    );
                     task.cmd
                         .process_write(snapshot, context)
                         .map_err(StorageError::from)
                 })
             };
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_process_write.observe(
+                start_instant.saturating_elapsed_secs(),
+            );
             SCHED_PROCESSING_READ_HISTOGRAM_STATIC
                 .get(tag)
                 .observe(begin_instant.saturating_elapsed_secs());
@@ -851,10 +873,13 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 
         let mut pr = Some(pr);
         if to_be_write.modifies.is_empty() {
-            scheduler.on_write_finished(cid, pr, Ok(()), lock_guards, false, false, tag);
+            scheduler.on_write_finished(cid, pr, Ok(()), lock_guards, false, false, tag, start_instant);
             return;
         }
 
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_try_write_in_mem_lock.observe(
+            start_instant.saturating_elapsed_secs(),
+        );
         if tag == CommandKind::acquire_pessimistic_lock
             && pessimistic_lock_mode == PessimisticLockMode::InMemory
             && self.try_write_in_memory_pessimistic_locks(
@@ -871,10 +896,18 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                     engine.schedule_txn_extra(to_be_write.extra);
                 })
             }
-            scheduler.on_write_finished(cid, pr, Ok(()), lock_guards, false, false, tag);
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_try_write_in_mem_lock.observe(
+                start_instant.saturating_elapsed_secs(),
+            );
+            scheduler.on_write_finished(cid, pr, Ok(()), lock_guards, false, false, tag, start_instant);
+            SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).after_in_mem_lock_write_finish.observe(
+                start_instant.saturating_elapsed_secs(),
+            );
             return;
         }
-
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_write.observe(
+            start_instant.saturating_elapsed_secs(),
+        );
         let mut is_async_apply_prewrite = false;
         let write_size = to_be_write.size();
         if ctx.get_disk_full_opt() == DiskFullOpt::AllowedOnAlmostFull {
@@ -977,7 +1010,9 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                 SCHED_THROTTLE_TIME.observe(start.saturating_elapsed_secs());
             }
         }
-
+        SCHEDULER_WATERFALL_HISTOGRAM_STATIC.get(tag).before_overwrite_lock.observe(
+            start_instant.saturating_elapsed_secs(),
+        );
         let (version, term) = (ctx.get_region_epoch().get_version(), ctx.get_term());
         // Mutations on the lock CF should overwrite the memory locks.
         // We only set a deleted flag here, and the lock will be finally removed when it finishes
@@ -1050,6 +1085,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                         pipelined,
                         is_async_apply_prewrite,
                         tag,
+                        start_instant
                     );
                     KV_COMMAND_KEYWRITE_HISTOGRAM_VEC
                         .get(tag)
