@@ -683,13 +683,7 @@ impl Command {
     }
 
     pub(crate) fn is_large(&self) -> bool {
-        if let Command::Prewrite(t) = self {
-            t.mutations.len() > 5
-        } else if let Command::PrewritePessimistic(t) = self {
-            t.mutations.len() > 5
-        } else {
-            false
-        }
+        !matches!(self, Command::AcquirePessimisticLock(_))
     }
 }
 
