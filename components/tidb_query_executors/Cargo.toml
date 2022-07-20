@@ -24,7 +24,7 @@ tidb_query_datatype = { path = "../tidb_query_datatype", default-features = fals
 tidb_query_expr = { path = "../tidb_query_expr", default-features = false }
 tikv_util = { path = "../tikv_util", default-features = false }
 tipb = { git = "https://github.com/pingcap/tipb.git" }
-yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
+yatp = { git = "https://github.com/ekexium/yatp.git", branch = "queue-length" }
 
 [dev-dependencies]
 anyhow = "1.0"

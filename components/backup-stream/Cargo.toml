@@ -63,7 +63,7 @@ tokio-util = { version = "0.7", features = ["compat"] }
 tonic = "0.5"
 txn_types = { path = "../txn_types", default-features = false }
 uuid = "0.8"
-yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
+yatp = { git = "https://github.com/ekexium/yatp.git", branch = "queue-length" }
 
 [dev-dependencies]
 async-trait = "0.1"

@@ -23,4 +23,11 @@ lazy_static! {
         exponential_buckets(1e-5, 4.0, 12).unwrap() // 10us ~ 41s
     )
     .unwrap();
+
+    pub static ref YATP_QUEUE_LENGTH_VEC: HistogramVec = register_histogram_vec!(
+        "tikv_yatp_queue_length",
+        "Histogram of yatp pool queue length when a task is enqueued.",
+        &["name"],
+        exponential_buckets(1.0, 2.0, 10).unwrap()
+    ).unwrap();
 }

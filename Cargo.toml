@@ -170,7 +170,7 @@ txn_types = { path = "components/txn_types", default-features = false }
 url = "2"
 uuid = { version = "0.8.1", features = ["serde", "v4"] }
 walkdir = "2"
-yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
+yatp = { git = "https://github.com/ekexium/yatp.git", branch = "queue-length" }
 
 [dev-dependencies]
 api_version = { path = "components/api_version", features = ["testexport"] }

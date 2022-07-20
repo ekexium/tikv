@@ -13,7 +13,7 @@ use std::{
 
 use fail::fail_point;
 use futures::channel::oneshot::{self, Canceled};
-use prometheus::{IntCounter, IntGauge};
+use prometheus::{Histogram, IntCounter, IntGauge};
 use tracker::TrackedFuture;
 use yatp::task::future;
 
@@ -25,6 +25,7 @@ use super::metrics;
 struct Env {
     metrics_running_task_count: IntGauge,
     metrics_handled_task_count: IntCounter,
+    queue_length: Histogram,
 }
 
 #[derive(Clone)]
@@ -48,6 +49,7 @@ impl FuturePool {
                 .with_label_values(&[name]),
             metrics_handled_task_count: metrics::FUTUREPOOL_HANDLED_TASK_VEC
                 .with_label_values(&[name]),
+            queue_length: metrics::YATP_QUEUE_LENGTH_VEC.with_label_values(&[name]),
         };
         FuturePool {
             inner: Arc::new(PoolInner {
@@ -82,6 +84,10 @@ impl FuturePool {
     where
         F: Future + Send + 'static,
     {
+        self.inner
+            .env
+            .queue_length
+            .observe(self.inner.pool.injector_length() as f64);
         self.inner.spawn(TrackedFuture::new(future))
     }
 

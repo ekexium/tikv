@@ -30,4 +30,4 @@ tikv_util = { path = "../tikv_util", default-features = false }
 tokio = { version = "1", features = ["sync"] }
 tokio-timer = { git = "https://github.com/tikv/tokio", branch = "tokio-timer-hotfix" }
 txn_types = { path = "../txn_types", default-features = false }
-yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
+yatp = { git = "https://github.com/ekexium/yatp.git", branch = "queue-length" }
