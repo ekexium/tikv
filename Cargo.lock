@@ -2619,7 +2619,7 @@ dependencies = [
 [[package]]
 name = "kvproto"
 version = "0.0.2"
-source = "git+https://github.com/TonsnakeLin/kvproto.git?branch=lock_if_exists#2ea047614e8780a61dc1284ea0983c744ffd1969"
+source = "git+https://github.com/ekexium/kvproto?branch=all-in-one#4c334bb9cb833b40298a610b4955afdd912955b2"
 dependencies = [
  "futures 0.3.15",
  "grpcio",
@@ -7097,8 +7097,3 @@ dependencies = [
  "cc",
  "libc 0.2.125",
 ]
-
-[[patch.unused]]
-name = "kvproto"
-version = "0.0.2"
-source = "git+https://github.com/ekexium/kvproto?branch=pessimistic-lock-type#ba7549963255f9dc4fc14b0c8b6f56049f467d01"
