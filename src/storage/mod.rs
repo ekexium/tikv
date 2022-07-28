@@ -415,7 +415,7 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
     ///   * Request of V2 with legal prefix.
     /// See the following for detail:
     ///   * rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md.
-    ///   * proto: https://github.com/pingcap/kvproto/blob/master/proto/kvrpcpb.proto, enum APIVersion.
+    ///   * proto: https://github.com/TonsnakeLin/kvproto/blob/master/proto/kvrpcpb.proto, enum APIVersion.
     // TODO: refactor to use `Api` parameter.
     fn check_api_version(
         storage_api_version: ApiVersion,
@@ -569,7 +569,7 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
         let api_version = self.api_version;
 
         let quota_limiter = self.quota_limiter.clone();
-        let mut sample = quota_limiter.new_sample();
+        let mut sample = quota_limiter.new_sample(true);
 
         let res = self.read_pool.spawn_handle(
             async move {
@@ -898,7 +898,7 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
         let concurrency_manager = self.concurrency_manager.clone();
         let api_version = self.api_version;
         let quota_limiter = self.quota_limiter.clone();
-        let mut sample = quota_limiter.new_sample();
+        let mut sample = quota_limiter.new_sample(true);
         let res = self.read_pool.spawn_handle(
             async move {
                 let stage_scheduled_ts = Instant::now();
@@ -2994,6 +2994,7 @@ pub mod test_util {
             for_update_ts.next(),
             OldValues::default(),
             check_existence,
+            false,
             Context::default(),
         )
     }
@@ -7314,6 +7315,7 @@ mod tests {
                     21.into(),
                     OldValues::default(),
                     false,
+                    false,
                     Context::default(),
                 ),
                 expect_ok_callback(tx, 0),
@@ -7998,6 +8000,7 @@ mod tests {
                     0.into(),
                     OldValues::default(),
                     false,
+                    false,
                     Default::default(),
                 ),
                 expect_ok_callback(tx.clone(), 0),
@@ -8019,6 +8022,7 @@ mod tests {
                     false,
                     0.into(),
                     OldValues::default(),
+                    false,
                     false,
                     Default::default(),
                 ),
@@ -8240,6 +8244,7 @@ mod tests {
                 TimeStamp::new(12),
                 OldValues::default(),
                 false,
+                false,
                 Context::default(),
             ),
             pipelined_pessimistic_lock: true,
@@ -8264,6 +8269,7 @@ mod tests {
                 false,
                 TimeStamp::new(12),
                 OldValues::default(),
+                false,
                 false,
                 Context::default(),
             ),
@@ -8493,7 +8499,7 @@ mod tests {
     // Test check_api_version.
     // See the following for detail:
     //   * rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md.
-    //   * proto: https://github.com/pingcap/kvproto/blob/master/proto/kvrpcpb.proto, enum APIVersion.
+    //   * proto: https://github.com/TonsnakeLin/kvproto/blob/master/proto/kvrpcpb.proto, enum APIVersion.
     #[test]
     fn test_check_api_version() {
         use error_code::storage::*;

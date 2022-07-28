@@ -12,6 +12,7 @@ use std::{
 
 use api_version::KvFormat;
 use collections::HashMap;
+use engine_traits::DummyFactory;
 use errors::{extract_key_error, extract_region_error};
 use futures::executor::block_on;
 use grpcio::*;
@@ -265,7 +266,7 @@ fn test_scale_scheduler_pool() {
     cfg_controller.register(
         Module::Storage,
         Box::new(StorageConfigManger::new(
-            kv_engine,
+            Arc::new(DummyFactory::new(Some(kv_engine), "".to_string())),
             cfg.storage.block_cache.shared,
             scheduler,
             flow_controller,
@@ -662,6 +663,7 @@ fn test_async_apply_prewrite_impl<E: Engine, F: KvFormat>(
                     0.into(),
                     OldValues::default(),
                     false,
+                    false,
                     ctx.clone(),
                 ),
                 Box::new(move |r| tx.send(r).unwrap()),
@@ -995,6 +997,7 @@ fn test_async_apply_prewrite_1pc_impl<E: Engine, F: KvFormat>(
                     false,
                     0.into(),
                     OldValues::default(),
+                    false,
                     false,
                     ctx.clone(),
                 ),

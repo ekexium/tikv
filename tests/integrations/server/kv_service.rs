@@ -1761,7 +1761,7 @@ fn test_get_lock_wait_info_api() {
 // Test API version verification for transaction requests.
 // See the following for detail:
 //   * rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md.
-//   * proto: https://github.com/pingcap/kvproto/blob/master/proto/kvrpcpb.proto, enum APIVersion.
+//   * proto: https://github.com/TonsnakeLin/kvproto/blob/master/proto/kvrpcpb.proto, enum APIVersion.
 #[test]
 fn test_txn_api_version() {
     const TIDB_KEY_CASE: &[u8] = b"t_a";
