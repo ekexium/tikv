@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use engine_traits::{KvEngine, RaftEngine, TabletFactory};
+use engine_traits::{KvEngine, OpenOptions, RaftEngine, TabletFactory};
 use kvproto::{metapb, raft_serverpb::RegionLocalState};
 use raft::{RawNode, INVALID_ID};
 use raftstore::store::{util::find_peer, Config};
@@ -10,19 +10,22 @@ use slog::{o, Logger};
 use tikv_util::{box_err, config::ReadableSize};
 
 use super::storage::Storage;
-use crate::Result;
+use crate::{
+    tablet::{self, CachedTablet},
+    Result,
+};
 
 /// A peer that delegates commands between state machine and raft.
 pub struct Peer<EK: KvEngine, ER: RaftEngine> {
     raft_group: RawNode<Storage<ER>>,
-    tablet: Option<EK>,
+    tablet: CachedTablet<EK>,
     logger: Logger,
 }
 
 impl<EK: KvEngine, ER: RaftEngine> Peer<EK, ER> {
     /// Creates a new peer.
     ///
-    /// If peer is destroyed, None is returned.
+    /// If peer is destroyed, `None` is returned.
     pub fn new(
         cfg: &Config,
         region_id: u64,
@@ -57,6 +60,8 @@ impl<EK: KvEngine, ER: RaftEngine> Peer<EK, ER> {
         };
 
         let tablet_index = s.region_state().get_tablet_index();
+        // Another option is always create tablet even if tablet index is 0. But this
+        // can introduce race when gc old tablet and create new peer.
         let tablet = if tablet_index != 0 {
             if !tablet_factory.exists(region_id, tablet_index) {
                 return Err(box_err!(
@@ -66,14 +71,18 @@ impl<EK: KvEngine, ER: RaftEngine> Peer<EK, ER> {
                 ));
             }
             // TODO: Perhaps we should stop create the tablet automatically.
-            Some(tablet_factory.open_tablet(region_id, tablet_index)?)
+            Some(tablet_factory.open_tablet(
+                region_id,
+                Some(tablet_index),
+                OpenOptions::default().set_create(true),
+            )?)
         } else {
             None
         };
 
         Ok(Some(Peer {
             raft_group: RawNode::new(&raft_cfg, s, &logger)?,
-            tablet,
+            tablet: CachedTablet::new(tablet),
             logger,
         }))
     }
@@ -94,7 +103,7 @@ impl<EK: KvEngine, ER: RaftEngine> Peer<EK, ER> {
     }
 
     #[inline]
-    pub fn tablet(&self) -> &Option<EK> {
+    pub fn tablet(&self) -> &CachedTablet<EK> {
         &self.tablet
     }
 
