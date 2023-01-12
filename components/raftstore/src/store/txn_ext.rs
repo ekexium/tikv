@@ -27,6 +27,9 @@ pub struct TxnExt {
 
     /// The in-memory pessimistic lock table of the peer.
     pub pessimistic_locks: RwLock<PeerPessimisticLocks>,
+
+    // start_ts => commit_ts?
+    pub cached_commits: RwLock<HashMap<u64, u64>>,
 }
 
 impl TxnExt {

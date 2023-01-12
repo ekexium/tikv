@@ -20,37 +20,15 @@ snmalloc = ["tikv_alloc/snmalloc"]
 portable = ["engine_rocks/portable"]
 sse = ["engine_rocks/sse"]
 mem-profiling = ["tikv_alloc/mem-profiling"]
-failpoints = [
-  "fail/failpoints",
-  "raftstore/failpoints",
-  "tikv_util/failpoints",
-  "engine_rocks/failpoints",
-]
-cloud-aws = [
-  "encryption_export/cloud-aws",
-  "sst_importer/cloud-aws",
-]
-cloud-gcp = [
-  "encryption_export/cloud-gcp",
-  "sst_importer/cloud-gcp",
-]
-cloud-azure = [
-  "encryption_export/cloud-azure",
-  "sst_importer/cloud-azure",
-]
+failpoints = ["fail/failpoints", "raftstore/failpoints", "tikv_util/failpoints", "engine_rocks/failpoints"]
+cloud-aws = ["encryption_export/cloud-aws", "sst_importer/cloud-aws"]
+cloud-gcp = ["encryption_export/cloud-gcp", "sst_importer/cloud-gcp"]
+cloud-azure = ["encryption_export/cloud-azure", "sst_importer/cloud-azure"]
 testexport = ["raftstore/testexport", "api_version/testexport", "causal_ts/testexport"]
-test-engine-kv-rocksdb = [
-  "engine_test/test-engine-kv-rocksdb"
-]
-test-engine-raft-raft-engine = [
-  "engine_test/test-engine-raft-raft-engine"
-]
-test-engines-rocksdb = [
-  "engine_test/test-engines-rocksdb",
-]
-test-engines-panic = [
-  "engine_test/test-engines-panic",
-]
+test-engine-kv-rocksdb = ["engine_test/test-engine-kv-rocksdb"]
+test-engine-raft-raft-engine = ["engine_test/test-engine-raft-raft-engine"]
+test-engines-rocksdb = ["engine_test/test-engines-rocksdb"]
+test-engines-panic = ["engine_test/test-engines-panic"]
 cloud-storage-grpc = ["sst_importer/cloud-storage-grpc"]
 cloud-storage-dylib = ["sst_importer/cloud-storage-dylib"]
 pprof-fp = ["pprof/frame-pointer"]
@@ -75,6 +53,7 @@ causal_ts = { workspace = true }
 chrono = "0.4"
 codec = { workspace = true }
 collections = { workspace = true }
+commit_cache = { workspace = true }
 concurrency_manager = { workspace = true }
 coprocessor_plugin_api = { workspace = true }
 crc32fast = "1.2"
@@ -116,6 +95,7 @@ log_wrappers = { workspace = true }
 match-template = "0.0.1"
 memory_trace_macros = { workspace = true }
 mime = "0.3.13"
+moka = "0.9.6"
 more-asserts = "0.2"
 murmur3 = "0.5.1"
 nom = { version = "5.1.0", default-features = false, features = ["std"] }
@@ -221,8 +201,8 @@ procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229
 # When you modify TiKV cooperatively with kvproto, this will be useful to submit the PR to TiKV and the PR to
 # kvproto at the same time.
 # After the PR to kvproto is merged, remember to comment this out and run `cargo update -p kvproto`.
-# [patch.'https://github.com/pingcap/kvproto']
-# kvproto = { git = "https://github.com/your_github_id/kvproto", branch = "your_branch" }
+[patch.'https://github.com/pingcap/kvproto']
+kvproto = { git = "https://github.com/ekexium/kvproto", branch = "cached-commit" }
 
 [workspace]
 # See https://github.com/rust-lang/rfcs/blob/master/text/2957-cargo-features2.md
@@ -245,6 +225,7 @@ members = [
   "components/cloud/gcp",
   "components/codec",
   "components/collections",
+  "components/commit_cache",
   "components/concurrency_manager",
   "components/coprocessor_plugin_api",
   "components/encryption",
@@ -314,6 +295,7 @@ cdc = { path = "components/cdc", default-features = false }
 cloud = { path = "components/cloud" }
 codec = { path = "components/codec" }
 collections = { path = "components/collections" }
+commit_cache = { path = "components/commit_cache" }
 concurrency_manager = { path = "components/concurrency_manager" }
 coprocessor_plugin_api = { path = "components/coprocessor_plugin_api" }
 encryption = { path = "components/encryption" }

@@ -3,6 +3,7 @@
 use std::{borrow::Cow, mem::size_of};
 
 use byteorder::ReadBytesExt;
+use commit_cache::COMMIT_CACHE;
 use kvproto::kvrpcpb::{IsolationLevel, LockInfo, Op, WriteConflictReason};
 use tikv_util::codec::{
     bytes::{self, BytesEncoder},
@@ -434,6 +435,12 @@ impl Lock {
             // for primary key), and current key is the primary key, we ignore
             // this lock.
             return Ok(());
+        }
+
+        if let Some(commit_ts) = COMMIT_CACHE.get(lock.ts.into_inner()) {
+            if commit_ts <= ts.into_inner() {
+                return Ok(());
+            }
         }
 
         // There is a pending lock. Client should wait or clean it.

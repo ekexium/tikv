@@ -36,6 +36,7 @@ use std::{
 
 use causal_ts::CausalTsProviderImpl;
 use collections::HashMap;
+use commit_cache::COMMIT_CACHE;
 use concurrency_manager::{ConcurrencyManager, KeyHandleGuard};
 use crossbeam::utils::CachePadded;
 use engine_traits::{CF_DEFAULT, CF_LOCK, CF_WRITE};
@@ -1177,6 +1178,17 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         let raw_ext = raw_ext.unwrap();
 
         let deadline = task.cmd.deadline();
+
+        let start_ts_of_cached_commit = {
+            match task.cmd {
+                Command::Commit(ref c) if c.is_async_committed => {
+                    COMMIT_CACHE.insert(c.lock_ts.into_inner(), c.commit_ts.into_inner());
+                    Some(c.lock_ts.into_inner())
+                }
+                _ => None,
+            }
+        };
+
         let write_result = {
             let _guard = sample.observe_cpu();
             let context = WriteContext {
@@ -1453,6 +1465,9 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                         }
                     }
                 }
+            }
+            if let Some(t) = start_ts_of_cached_commit {
+                COMMIT_CACHE.remove(t)
             }
         });
 
@@ -1895,6 +1910,7 @@ mod tests {
                 vec![Key::from_raw(b"k")],
                 10.into(),
                 20.into(),
+                false,
                 Context::default(),
             )
             .into(),

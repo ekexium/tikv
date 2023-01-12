@@ -50,6 +50,9 @@ CLIPPY_LINTS=(
     -D clippy::assertions_on_result_states \
 )
 
+
+echo ${TIKV_ENABLE_FEATURES}
+
 cargo clippy --workspace \
     --exclude fuzz-targets --exclude fuzzer-honggfuzz --exclude fuzzer-afl --exclude fuzzer-libfuzzer \
     --no-default-features --features "${TIKV_ENABLE_FEATURES}" "$@" -- "${CLIPPY_LINTS[@]}"

@@ -31,6 +31,8 @@ command! {
             lock_ts: txn_types::TimeStamp,
             /// The commit timestamp.
             commit_ts: txn_types::TimeStamp,
+            /// Whether the transaction applied async commit and has been considered committed.
+            is_async_committed: bool,
         }
 }
 
