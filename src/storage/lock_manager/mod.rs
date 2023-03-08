@@ -3,39 +3,27 @@
 use std::{
     fmt::{Debug, Formatter},
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc,
     },
     thread::JoinHandle,
     time::Duration,
 };
 
+use collections::{HashMap, HashSet};
+use engine_traits::KvEngine;
 use kvproto::{
     kvrpcpb::{self, LockInfo},
     metapb::RegionEpoch,
 };
 use parking_lot::Mutex;
-use smallvec::SmallVec;
-
-use collections::{HashMap, HashSet};
-use engine_traits::KvEngine;
 use pd_client::PdClient;
 use raftstore::coprocessor::CoprocessorHost;
 use security::SecurityManager;
+use smallvec::SmallVec;
 use tikv_util::worker::FutureWorker;
 use tracker::TrackerToken;
 use txn_types::{Key, TimeStamp};
-
-use crate::{
-    server::{Error, resolve::StoreAddrResolver, Result},
-    storage::{
-        DynamicConfigs as StorageDynamicConfigs,
-        Error as StorageError,
-        mvcc::{Error as MvccError, ErrorInner as MvccErrorInner, ReleasedLock}, txn::{commands::ReleasedLocks, Error as TxnError},
-    },
-};
-
-use super::txn::commands::WriteResultLockInfo;
 
 pub use self::{
     config::{Config, LockManagerConfigManager},
@@ -51,6 +39,15 @@ use self::{
     },
     // DiagnosticContext, KeyLockWaitInfo, LockWaitToken, UpdateWaitForEvent, WaitTimeout,
     waiter_manager::{Callback, Waiter, WaiterManager},
+};
+use super::txn::commands::WriteResultLockInfo;
+use crate::{
+    server::{resolve::StoreAddrResolver, Error, Result},
+    storage::{
+        mvcc::{Error as MvccError, ErrorInner as MvccErrorInner, ReleasedLock},
+        txn::{commands::ReleasedLocks, Error as TxnError},
+        DynamicConfigs as StorageDynamicConfigs, Error as StorageError,
+    },
 };
 
 mod client;
@@ -132,9 +129,9 @@ impl LockManager {
         security_mgr: Arc<SecurityManager>,
         cfg: &Config,
     ) -> Result<()>
-        where
-            S: StoreAddrResolver + 'static,
-            P: PdClient + 'static,
+    where
+        S: StoreAddrResolver + 'static,
+        P: PdClient + 'static,
     {
         self.start_waiter_manager(cfg)?;
         self.start_deadlock_detector(store_id, pd_client, resolver, security_mgr, cfg)?;
@@ -182,9 +179,9 @@ impl LockManager {
         security_mgr: Arc<SecurityManager>,
         cfg: &Config,
     ) -> Result<()>
-        where
-            S: StoreAddrResolver + 'static,
-            P: PdClient + 'static,
+    where
+        S: StoreAddrResolver + 'static,
+        P: PdClient + 'static,
     {
         let detector_runner = Detector::new(
             store_id,
@@ -363,10 +360,12 @@ impl LockManagerTrait for LockManager {
     }
 }
 
-// The lock manager decides how to handle the released locks, and returns 3 lists as actions to take a result
-// (0) The list of lock wait entries that should be woken up immediately. This is the legacy mode, responses are directly returned to TiDB.
-// (1) The list of futures that should be woken up after a delay.
-// (2) The list of lock wait entries that should be resumed after current command's success.
+// The lock manager decides how to handle the released locks, and returns 3
+// lists as actions to take a result (0) The list of lock wait entries that
+// should be woken up immediately. This is the legacy mode, responses are
+// directly returned to TiDB. (1) The list of futures that should be woken up
+// after a delay. (2) The list of lock wait entries that should be resumed after
+// current command's success.
 pub(super) fn actions_for_released_locks(
     lock_mgr: &impl LockManagerTrait,
     released_locks: ReleasedLocks,
@@ -388,16 +387,15 @@ pub(super) fn actions_for_released_locks(
     Some(released_locks.into_iter().fold(
         (SmallVec::new(), SmallVec::new(), SmallVec::new()),
         |mut acc, released_lock| {
-            let (lock_wait_entry, delay_wake_up_future) =
-                match lock_mgr.pop_for_waking_up(
-                    &released_lock.key,
-                    released_lock.start_ts,
-                    released_lock.commit_ts,
-                    wake_up_delay_duration_ms,
-                ) {
-                    Some(e) => e,
-                    None => return acc,
-                };
+            let (lock_wait_entry, delay_wake_up_future) = match lock_mgr.pop_for_waking_up(
+                &released_lock.key,
+                released_lock.start_ts,
+                released_lock.commit_ts,
+                wake_up_delay_duration_ms,
+            ) {
+                Some(e) => e,
+                None => return acc,
+            };
 
             if lock_wait_entry.parameters.allow_lock_with_conflict {
                 // resume this lock request
@@ -411,7 +409,8 @@ pub(super) fn actions_for_released_locks(
                 acc.1.push(f);
             }
             acc
-        }))
+        },
+    ))
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -859,22 +858,19 @@ pub mod proxy_test {
 mod tests {
     use std::{thread, time::Duration};
 
+    use engine_test::kv::KvTestEngine;
     use futures::executor::block_on;
     use kvproto::metapb::{Peer, Region};
     use raft::StateRole;
-
-    use engine_test::kv::KvTestEngine;
     use raftstore::coprocessor::RegionChangeEvent;
     use security::SecurityConfig;
     use tikv_util::config::ReadableDuration;
-    use tracker::{INVALID_TRACKER_TOKEN, TrackerToken};
+    use tracker::{TrackerToken, INVALID_TRACKER_TOKEN};
     use txn_types::Key;
 
-    use crate::storage::lock_manager::LockDigest;
-
-    use super::*;
-
     use self::{deadlock::tests::*, metrics::*, waiter_manager::tests::*};
+    use super::*;
+    use crate::storage::lock_manager::LockDigest;
 
     fn start_lock_manager() -> LockManager {
         let mut coprocessor_host = CoprocessorHost::<KvTestEngine>::default();
@@ -1117,7 +1113,7 @@ mod tests {
             0,
             500,
         );
-        assert_eq!(TASK_COUNTER_METRICS.wait_for.get(), prev_wait_for, );
+        assert_eq!(TASK_COUNTER_METRICS.wait_for.get(), prev_wait_for,);
     }
 
     #[bench]

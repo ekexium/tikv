@@ -689,6 +689,7 @@ impl UnsafeRecoveryExecutePlanSyncer {
         *self.abort.lock().unwrap() = true;
     }
 }
+
 // Syncer only send to leader in 2nd BR restore
 #[derive(Clone, Debug)]
 pub struct SnapshotRecoveryWaitApplySyncer {
@@ -849,7 +850,7 @@ where
     /// The ID of the Region which this Peer belongs to.
     region_id: u64,
     // TODO: remove it once panic!() support slog fields.
-    /// Peer_tag, "[region <region_id>] <peer_id>"
+    /// Peer_tag, "[region<region_id>] <peer_id>"
     pub tag: String,
     /// The Peer meta information.
     pub peer: metapb::Peer,
@@ -4087,7 +4088,13 @@ where
         request: Option<&raft_cmdpb::ReadIndexRequest>,
         locked: Option<&LockInfo>,
     ) -> (Uuid, bool) {
-        propose_read_index(&mut self.raft_group, request, locked)
+        let res = propose_read_index(&mut self.raft_group, request, locked);
+        debug!("*** propose read index";
+            "start_ts" => ?request.map(|r| r.get_start_ts()),
+            "uuid" => ?res.0,
+            "dropped" => res.1
+        );
+        res
     }
 
     /// Returns (minimal matched, minimal committed_index)
@@ -5769,18 +5776,18 @@ mod memtrace {
         pub fn rest_size(&self) -> usize {
             // 2 words for every item in `peer_heartbeats`.
             16 * self.peer_heartbeats.capacity()
-            // 2 words for every item in `peers_start_pending_time`.
-            + 16 * self.peers_start_pending_time.capacity()
-            // 1 word for every item in `down_peer_ids`
-            + 8 * self.down_peer_ids.capacity()
-            + mem::size_of::<metapb::Peer>() * self.check_stale_peers.capacity()
-            // 1 word for every item in `want_rollback_merge_peers`
-            + 8 * self.want_rollback_merge_peers.capacity()
-            // Ignore more heap content in `raft::eraftpb::Message`.
-            + (self.unpersisted_message_count
+                // 2 words for every item in `peers_start_pending_time`.
+                + 16 * self.peers_start_pending_time.capacity()
+                // 1 word for every item in `down_peer_ids`
+                + 8 * self.down_peer_ids.capacity()
+                + mem::size_of::<metapb::Peer>() * self.check_stale_peers.capacity()
+                // 1 word for every item in `want_rollback_merge_peers`
+                + 8 * self.want_rollback_merge_peers.capacity()
+                // Ignore more heap content in `raft::eraftpb::Message`.
+                + (self.unpersisted_message_count
                 + self.apply_snap_ctx.as_ref().map_or(0, |ctx| ctx.msgs.len()))
                 * mem::size_of::<eraftpb::Message>()
-            + mem::size_of_val(self.pending_request_snapshot_count.as_ref())
+                + mem::size_of_val(self.pending_request_snapshot_count.as_ref())
         }
     }
 }

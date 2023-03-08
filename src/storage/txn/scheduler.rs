@@ -1591,7 +1591,8 @@ impl<E: Engine, L: LockManagerTrait> TxnScheduler<E, L> {
             lock_info.parameters.allow_lock_with_conflict,
         );
         // let first_batch_cb = ctx.get_callback_for_first_write_batch();
-        // task_ctx.cb = Some(SchedulerTaskCallback::NormalRequestCallback(first_batch_cb));
+        // task_ctx.cb =
+        // Some(SchedulerTaskCallback::NormalRequestCallback(first_batch_cb));
         drop(slot);
 
         assert!(lock_info.req_states.is_none());
