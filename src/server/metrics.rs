@@ -227,7 +227,7 @@ lazy_static! {
         "tikv_grpc_msg_duration_seconds",
         "Bucketed histogram of grpc server messages",
         &["type"],
-        exponential_buckets(5e-5, 2.0, 22).unwrap() // 50us ~ 104s
+        exponential_buckets(5e-5, 2.0, 32).unwrap() // 50us ~ 1.24 days
     )
     .unwrap();
     pub static ref SERVER_INFO_GAUGE_VEC: IntGaugeVec = register_int_gauge_vec!(
@@ -506,7 +506,7 @@ lazy_static! {
         "tikv_storage_engine_async_request_duration_seconds",
         "Bucketed histogram of processing successful asynchronous requests.",
         &["type"],
-        exponential_buckets(0.00001, 2.0, 26).unwrap()
+        exponential_buckets(0.00001, 2.0, 34).unwrap() // ~23 hours
     )
     .unwrap();
 }
