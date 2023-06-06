@@ -77,6 +77,22 @@ macro_rules! debug(($($args:tt)+) => {
     ::slog_global::debug!($($args)+)
 };);
 
+// corr_debug! is used specifically for correctness tests like Jepsen. It should
+// be used to print key states in the test. It is distinct from debug! in that
+// it is in INFO level if the corresponding feature gate is enabled
+// so that there won't be too much unnecessary debug logs.
+#[cfg(feature = "correctness-test")]
+#[macro_export]
+macro_rules! corr_debug(($($args:tt)+) => {
+    ::slog_global::info!($($args)+)
+};);
+
+#[cfg(not(feature = "correctness-test"))]
+#[macro_export]
+macro_rules! corr_debug(($($args:tt)+) => {
+    ::slog_global::debug!($($args)+)
+};);
+
 /// Logs a trace level message using the slog global logger.
 #[macro_export]
 macro_rules! trace(($($args:tt)+) => {

@@ -1,8 +1,5 @@
 // Copyright 2017 TiKV Project Authors. Licensed under Apache-2.0.
 
-// #[PerformanceCriticalPath]
-#[cfg(test)]
-use std::sync::mpsc::Sender;
 use std::{
     borrow::Cow,
     cmp,
@@ -13,26 +10,19 @@ use std::{
     mem,
     ops::{Deref, DerefMut, Range as StdRange},
     sync::{
+        Arc,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        mpsc::SyncSender,
-        Arc, Mutex,
+        mpsc::SyncSender, Mutex,
     },
     time::Duration,
     usize,
     vec::Drain,
 };
+// #[PerformanceCriticalPath]
+#[cfg(test)]
+use std::sync::mpsc::Sender;
 
-use batch_system::{
-    BasicMailbox, BatchRouter, BatchSystem, Config as BatchSystemConfig, Fsm, HandleResult,
-    HandlerBuilder, PollHandler, Priority,
-};
-use collections::{HashMap, HashMapEntry, HashSet};
 use crossbeam::channel::{TryRecvError, TrySendError};
-use engine_traits::{
-    util::SequenceNumber, DeleteStrategy, KvEngine, Mutable, PerfContext, PerfContextKind,
-    RaftEngine, RaftEngineReadOnly, Range as EngineRange, Snapshot, SstMetaInfo, WriteBatch,
-    ALL_CFS, CF_DEFAULT, CF_LOCK, CF_RAFT, CF_WRITE,
-};
 use fail::fail_point;
 use kvproto::{
     import_sstpb::SstMeta,
@@ -44,44 +34,57 @@ use kvproto::{
     },
     raft_serverpb::{MergeState, PeerState, RaftApplyState, RaftTruncatedState, RegionLocalState},
 };
-use pd_client::{BucketMeta, BucketStat};
 use prometheus::local::LocalHistogram;
-use protobuf::{wire_format::WireType, CodedInputStream, Message};
+use protobuf::{CodedInputStream, Message, wire_format::WireType};
 use raft::eraftpb::{
     ConfChange, ConfChangeType, ConfChangeV2, Entry, EntryType, Snapshot as RaftSnapshot,
 };
 use raft_proto::ConfChangeI;
-use resource_control::{ResourceConsumeType, ResourceController, ResourceMetered};
 use smallvec::{smallvec, SmallVec};
+use time::Timespec;
+use uuid::Builder as UuidBuilder;
+
+use batch_system::{
+    BasicMailbox, BatchRouter, BatchSystem, Config as BatchSystemConfig, Fsm, HandlerBuilder,
+    HandleResult, PollHandler, Priority,
+};
+use collections::{HashMap, HashMapEntry, HashSet};
+use engine_traits::{
+    ALL_CFS, CF_DEFAULT, CF_LOCK, CF_RAFT, CF_WRITE, DeleteStrategy,
+    KvEngine, Mutable, PerfContext, PerfContextKind, RaftEngine, RaftEngineReadOnly,
+    Range as EngineRange, Snapshot, SstMetaInfo, util::SequenceNumber, WriteBatch,
+};
+use pd_client::{BucketMeta, BucketStat};
+use resource_control::{ResourceConsumeType, ResourceController, ResourceMetered};
 use sst_importer::SstImporter;
 use tikv_alloc::trace::TraceEvent;
 use tikv_util::{
     box_err, box_try,
     config::{Tracker, VersionTrack},
-    debug, error, info,
+    corr_debug, debug, Either, error,
+    info,
     memory::HeapSize,
-    mpsc::{loose_bounded, LooseBoundedSender, Receiver},
-    safe_panic, slow_log,
+    mpsc::{loose_bounded, LooseBoundedSender, Receiver}, MustConsumeVec,
+    safe_panic,
+    slow_log,
     store::{find_peer, find_peer_by_id, find_peer_mut, is_learner, remove_peer},
     time::{duration_to_sec, Instant},
-    warn,
-    worker::Scheduler,
-    Either, MustConsumeVec,
+    warn, worker::Scheduler,
 };
-use time::Timespec;
 use tracker::GLOBAL_TRACKERS;
-use uuid::Builder as UuidBuilder;
+#[cfg(feature = "correctness-test")]
+use protobuf::PbPrint;
 
-use self::memtrace::*;
-use super::metrics::*;
 use crate::{
     bytes_capacity,
     coprocessor::{
         ApplyCtxInfo, Cmd, CmdBatch, CmdObserveInfo, CoprocessorHost, ObserveHandle, ObserveLevel,
         RegionState,
     },
-    store::{
+    Error,
+    Result, store::{
         cmd_resp,
+        Config,
         entry_storage::{self, CachedEntries},
         fsm::RaftPollerBuilder,
         local_metrics::RaftMetrics,
@@ -90,14 +93,16 @@ use crate::{
         msg::{Callback, ErrorCallback, PeerMsg, ReadResponse, SignificantMsg},
         peer::Peer,
         peer_storage::{write_initial_apply_state, write_peer_state},
-        util::{
-            self, admin_cmd_epoch_lookup, check_flashback_state, check_req_region_epoch,
-            compare_region_epoch, ChangePeerI, ConfChangeKind, KeysInfoFormatter, LatencyInspector,
-        },
-        Config, RegionSnapshot, RegionTask, WriteCallback,
+        RegionSnapshot, RegionTask, util::{
+            self, admin_cmd_epoch_lookup, ChangePeerI, check_flashback_state,
+            check_req_region_epoch, compare_region_epoch, ConfChangeKind, KeysInfoFormatter, LatencyInspector,
+        }, WriteCallback,
     },
-    Error, Result,
 };
+
+use super::metrics::*;
+
+use self::memtrace::*;
 
 // These consts are shared in both v1 and v2.
 pub const DEFAULT_APPLY_WB_SIZE: usize = 4 * 1024;
@@ -1364,6 +1369,19 @@ where
         term: u64,
         req: RaftCmdRequest,
     ) -> ApplyResult<EK::Snapshot> {
+        #[cfg(feature = "correctness-test")]
+        {
+            if req.get_header().get_source_stmt().start_ts > 0 {
+                // it ignores log redaction, only log it in test build.
+                let mut str = String::new();
+                PbPrint::fmt(&req.requests, "requests", &mut str);
+                corr_debug!(
+                    "apply";
+                    "source_stmt" => ?req.get_header().get_source_stmt(),
+                    "requests" => &str,
+                );
+            }
+        }
         if index == 0 {
             panic!(
                 "{} processing raft command needs a none zero index",
@@ -1741,11 +1759,13 @@ where
         );
 
         let requests = req.get_requests();
+        let source_stmt = req.get_header().get_source_stmt();
 
         let mut ranges = vec![];
         let mut ssts = vec![];
         for req in requests {
             let cmd_type = req.get_cmd_type();
+            corr_debug!("apply"; "source_stmt" => ?source_stmt, "cmd type" => ?cmd_type);
             match cmd_type {
                 CmdType::Put => self.handle_put(ctx, req),
                 CmdType::Delete => self.handle_delete(ctx, req),
@@ -5001,15 +5021,12 @@ mod tests {
     use std::{
         cell::RefCell,
         rc::Rc,
-        sync::{atomic::*, *},
+        sync::{*, atomic::*},
         thread,
         time::*,
     };
 
     use bytes::Bytes;
-    use engine_panic::PanicEngine;
-    use engine_test::kv::{new_engine, KvTestEngine, KvTestSnapshot};
-    use engine_traits::{Peekable as PeekableTrait, SyncMutable, WriteBatchExt};
     use kvproto::{
         kvrpcpb::ApiVersion,
         metapb::{self, RegionEpoch},
@@ -5017,8 +5034,13 @@ mod tests {
     };
     use protobuf::Message;
     use raft::eraftpb::{ConfChange, ConfChangeV2};
-    use sst_importer::Config as ImportConfig;
     use tempfile::{Builder, TempDir};
+    use uuid::Uuid;
+
+    use engine_panic::PanicEngine;
+    use engine_test::kv::{KvTestEngine, KvTestSnapshot, new_engine};
+    use engine_traits::{Peekable as PeekableTrait, SyncMutable, WriteBatchExt};
+    use sst_importer::Config as ImportConfig;
     use test_sst_importer::*;
     use tikv_util::{
         config::{ReadableSize, VersionTrack},
@@ -5026,18 +5048,18 @@ mod tests {
         worker::dummy_scheduler,
     };
     use txn_types::WriteBatchFlags;
-    use uuid::Uuid;
 
-    use super::*;
     use crate::{
         coprocessor::*,
         store::{
+            Config,
             msg::WriteResponse,
             peer_storage::RAFT_INIT_LOG_INDEX,
-            simple_write::{SimpleWriteEncoder, SimpleWriteReqEncoder},
-            Config, RegionTask,
+            RegionTask, simple_write::{SimpleWriteEncoder, SimpleWriteReqEncoder},
         },
     };
+
+    use super::*;
 
     impl GenSnapTask {
         fn new_for_test(region_id: u64, snap_notifier: SyncSender<RaftSnapshot>) -> GenSnapTask {

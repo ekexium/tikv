@@ -120,6 +120,10 @@ ENABLE_FEATURES += cloud-gcp
 ENABLE_FEATURES += cloud-azure
 endif
 
+ifeq ($(CORR_TEST), 1)
+ENABLE_FEATURES += correctness-test
+endif
+
 PROJECT_DIR:=$(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
 BIN_PATH = $(CURDIR)/bin
@@ -163,7 +167,7 @@ endif
 .PHONY: docker docker-tag docker-tag-with-git-hash docker-tag-with-git-tag
 .PHONY: ctl dist_artifacts dist_tarballs x-build-dist
 .PHONY: build_dist_release dist_release dist_unportable_release
-.PHONY: fail_release prof_release release unportable_release
+.PHONY: fail_release prof_release release unportable_release corr_release
 
 
 default: release
@@ -205,6 +209,8 @@ endif
 # with RocksDB compiled with the "portable" option, for -march=x86-64 (an
 # sse2-level instruction set), but with sse4.2 and the PCLMUL instruction
 # enabled (the "sse" option)
+corr_release:
+	CORR_TEST=1 make release
 release: export TIKV_PROFILE=release
 ifeq ($(TIKV_FRAME_POINTER),1)
 release:

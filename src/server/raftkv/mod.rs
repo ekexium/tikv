@@ -165,6 +165,7 @@ pub fn new_request_header(ctx: &Context) -> RaftRequestHeader {
             .get_resource_group_name()
             .to_owned(),
     );
+    header.set_source_stmt(ctx.get_source_stmt().clone());
     header
 }
 

@@ -27,6 +27,8 @@ cloud-aws = ["sst_importer/cloud-aws"]
 cloud-gcp = ["sst_importer/cloud-gcp"]
 cloud-azure = ["sst_importer/cloud-azure"]
 
+correctness-test = []
+
 [dependencies]
 batch-system = { workspace = true }
 bitflags = "1.0.1"

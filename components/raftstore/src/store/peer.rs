@@ -44,6 +44,10 @@ use kvproto::{
 use parking_lot::RwLockUpgradableReadGuard;
 use pd_client::{BucketStat, INVALID_ID};
 use protobuf::Message;
+#[cfg(feature = "correctness-test")]
+use protobuf::PbPrint;
+#[cfg(feature = "correctness-test")]
+use tikv_util::corr_debug;
 use raft::{
     self,
     eraftpb::{self, Entry, EntryType, MessageType},
@@ -4371,6 +4375,19 @@ where
         poll_ctx: &mut PollContext<EK, ER, T>,
         mut req: RaftCmdRequest,
     ) -> Result<Either<u64, u64>> {
+        #[cfg(feature = "correctness-test")]
+        {
+            if req.get_header().get_source_stmt().start_ts > 0 {
+                // it ignores log redaction, only log it in test build.
+                let mut str = String::new();
+                PbPrint::fmt(&req.requests, "requests", &mut str);
+                corr_debug!(
+                    "propose_normal";
+                    "source_stmt" => ?req.get_header().get_source_stmt(),
+                    "requests" => &str,
+                );
+            }
+        }
         // Should not propose normal in force leader state.
         // In `pre_propose_raft_command`, it rejects all the requests expect conf-change
         // if in force leader state.

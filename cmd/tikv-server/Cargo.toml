@@ -31,6 +31,8 @@ nortcheck = ["server/nortcheck"]
 
 pprof-fp = ["tikv/pprof-fp"]
 
+correctness-test = ["tikv/correctness-test"]
+
 [dependencies]
 clap = "2.32"
 encryption_export = { workspace = true }
