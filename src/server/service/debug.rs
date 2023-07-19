@@ -1,5 +1,6 @@
 // Copyright 2017 TiKV Project Authors. Licensed under Apache-2.0.
 
+use std::ops::Sub;
 use std::sync::{Arc, Mutex};
 
 use futures::{
@@ -12,10 +13,11 @@ use grpcio::{
     WriteFlags,
 };
 use kvproto::debugpb::{self, *};
+use tokio::runtime::Handle;
+
 use raftstore::store::fsm::store::StoreRegionMeta;
 use tikv_kv::RaftExtension;
 use tikv_util::{future::paired_future_callback, metrics};
-use tokio::runtime::Handle;
 
 use crate::server::debug::{Debugger, Error, Result};
 
@@ -658,7 +660,11 @@ where
                 resp.set_read_state_apply_index(core.read_state().idx);
                 resp.set_discard(core.discarding());
                 // TODO: set durations
-                // resp.set_duration_to_last_consume_leader_ms();
+                resp.set_duration_to_last_consume_leader_ms(
+                    core.instant_of_last_consume_leader()
+                        .map(|i| i.saturating_elapsed().as_millis() as u64)
+                        .unwrap_or_default()
+                );
                 // resp.set_duration_to_last_update_safe_ts_ms();
             } else {
                 resp.set_region_read_progress_exist(false);

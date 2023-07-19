@@ -40,6 +40,7 @@ use tikv_util::{
 };
 use time::{Duration, Timespec};
 use tokio::sync::Notify;
+use tikv_util::time::Instant;
 use txn_types::WriteBatchFlags;
 
 use super::{metrics::PEER_ADMIN_CMD_COUNTER_VEC, peer_storage, Config};
@@ -1364,6 +1365,7 @@ impl RegionReadProgress {
             }
             coprocessor.on_update_safe_ts(leader_info.region_id, self.safe_ts(), rs.get_safe_ts())
         }
+        core.instant_of_last_consume_leader = Some(Instant::now());
         // whether the provided `LeaderInfo` is same as ours
         core.leader_info.leader_term == leader_info.term
             && core.leader_info.leader_id == leader_info.peer_id
@@ -1458,6 +1460,7 @@ pub struct RegionReadProgressCore {
     discard: bool,
     // A notify to trigger advancing resolved ts immediately.
     advance_notify: Option<Arc<Notify>>,
+    instant_of_last_consume_leader: Option<Instant>,
 }
 
 // A helpful wrapper of `(apply_index, safe_ts)` item
@@ -1530,6 +1533,7 @@ impl RegionReadProgressCore {
             pause: is_witness,
             discard: is_witness,
             advance_notify: None,
+            instant_of_last_consume_leader: None,
         }
     }
 
@@ -1674,6 +1678,10 @@ impl RegionReadProgressCore {
 
     pub fn discarding(&self) -> bool {
         self.discard
+    }
+
+    pub fn instant_of_last_consume_leader(&self) -> &Option<Instant> {
+        &self.instant_of_last_consume_leader
     }
 }
 

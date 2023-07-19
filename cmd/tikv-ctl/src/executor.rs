@@ -5,32 +5,33 @@ use std::{
     time::Duration, u64,
 };
 
-use api_version::{ApiV1, KvFormat};
-use encryption_export::data_key_manager_from_config;
-use engine_rocks::util::{db_exist, new_engine_opt};
-use engine_traits::{
-    Engines, Error as EngineError, RaftEngine, TabletRegistry, ALL_CFS, CF_DEFAULT, CF_LOCK,
-    CF_WRITE, DATA_CFS,
-};
-use file_system::read_dir;
 use futures::{executor::block_on, future, stream, Stream, StreamExt, TryStreamExt};
 use grpcio::{ChannelBuilder, Environment};
 use kvproto::{
-    debugpb::{Db as DbType, *},
+    debugpb::{*, Db as DbType},
     kvrpcpb::{KeyRange, MvccInfo},
     metapb::{Peer, Region},
     raft_cmdpb::RaftCmdRequest,
     raft_serverpb::PeerState,
 };
-use pd_client::{Config as PdConfig, PdClient, RpcClient};
 use protobuf::Message;
 use raft::eraftpb::{ConfChange, ConfChangeV2, Entry, EntryType};
-use raft_log_engine::RaftLogEngine;
-use raftstore::store::{util::build_key_range, INIT_EPOCH_CONF_VER};
-use security::SecurityManager;
 use serde_json::json;
-use server::fatal;
 use slog_global::crit;
+
+use api_version::{ApiV1, KvFormat};
+use encryption_export::data_key_manager_from_config;
+use engine_rocks::util::{db_exist, new_engine_opt};
+use engine_traits::{
+    ALL_CFS, CF_DEFAULT, CF_LOCK, CF_WRITE, DATA_CFS, Engines, Error as EngineError,
+    RaftEngine, TabletRegistry,
+};
+use file_system::read_dir;
+use pd_client::{Config as PdConfig, PdClient, RpcClient};
+use raft_log_engine::RaftLogEngine;
+use raftstore::store::{INIT_EPOCH_CONF_VER, util::build_key_range};
+use security::SecurityManager;
+use server::fatal;
 use tikv::{
     config::{ConfigController, TikvConfig},
     server::{
@@ -40,9 +41,9 @@ use tikv::{
     },
     storage::{
         config::EngineType,
+        Engine,
         kv::MockEngine,
         lock_manager::{LockManager, MockLockManager},
-        Engine,
     },
 };
 use tikv_util::escape;
@@ -1008,14 +1009,15 @@ impl DebugExecutor for DebugClient {
             ),
             ("paused", resp.get_region_read_progress_paused().to_string()),
             ("discarding", resp.get_discard().to_string()),
+            // TODO: figure out the performance impact here before implementing it.
             // (
             //     "duration to last update_safe_ts",
             //     format!("{} ms", resp.get_duration_to_last_update_safe_ts_ms()),
             // ),
-            // (
-            //     "duration to last consume_leader_info",
-            //     format!("{} ms", resp.get_duration_to_last_consume_leader_ms()),
-            // ),
+            (
+                "duration to last consume_leader_info",
+                format!("{} ms", resp.get_duration_to_last_consume_leader_ms()),
+            ),
             ("Resolver:", "".to_owned()),
             ("exist", resp.get_resolver_exist().to_string()),
             ("resolved_ts", resp.get_resolved_ts().to_string()),
