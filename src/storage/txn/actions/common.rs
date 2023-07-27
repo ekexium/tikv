@@ -1,6 +1,6 @@
 // Copyright 2023 TiKV Project Authors. Licensed under Apache-2.0.
 
-use tikv_kv::Snapshot;
+use tikv_kv::{Snapshot, SEEK_BOUND};
 use txn_types::{Key, LastChange, TimeStamp, Write, WriteType};
 
 use crate::storage::mvcc::{Result, SnapshotReader};
@@ -42,8 +42,6 @@ pub fn next_last_change_info<S: Snapshot>(
                     let stat = reader.take_statistics();
                     original_reader.reader.statistics.add(&stat);
                     match res? {
-                        // last_change_ts == 0 && estimated_versions_to_last_change > 0 means the
-                        // key does not exist.
                         None => Ok(LastChange::NotExist),
                         Some((w, last_change_ts)) => {
                             assert!(matches!(w.write_type, WriteType::Put));

@@ -7,7 +7,7 @@ pub mod flow_controller;
 pub mod sched_pool;
 pub mod scheduler;
 
-mod actions;
+pub mod actions;
 mod latch;
 mod store;
 

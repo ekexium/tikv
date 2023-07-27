@@ -791,7 +791,15 @@ impl<S: EngineSnapshot> MvccReader<S> {
 
 #[cfg(test)]
 pub mod tests {
-    use std::{ops::Bound, u64};
+    use std::{
+        fmt::Debug,
+        ops::Bound,
+        sync::{
+            atomic::{AtomicU32, Ordering},
+            Arc, Mutex,
+        },
+        u64,
+    };
 
     use concurrency_manager::ConcurrencyManager;
     use engine_rocks::{
@@ -799,8 +807,8 @@ pub mod tests {
         RocksSnapshot,
     };
     use engine_traits::{
-        CompactExt, IterOptions, MiscExt, Mutable, SyncMutable, WriteBatch, WriteBatchExt, ALL_CFS,
-        CF_DEFAULT, CF_LOCK, CF_RAFT, CF_WRITE,
+        CompactExt, IterOptions, KvEngine, MiscExt, Mutable, SyncMutable, WriteBatch,
+        WriteBatchExt, ALL_CFS, CF_DEFAULT, CF_LOCK, CF_RAFT, CF_WRITE,
     };
     use kvproto::{
         kvrpcpb::{AssertionLevel, Context, PrewriteRequestPessimisticAction::*},
@@ -2461,8 +2469,8 @@ pub mod tests {
             engine.lock(k, start_ts, start_ts + 1);
         }
 
-        let snap = RegionSnapshot::<RocksSnapshot>::from_raw(db, region);
-        let mut reader = MvccReader::new(snap, None, false);
+        let snap = RegionSnapshot::<RocksSnapshot>::from_raw(db.clone(), region);
+        let mut reader = MvccReader::new(snap.clone(), None, false);
 
         let res = reader
             .get_write_with_commit_ts(&Key::from_raw(k), 40.into(), None)
@@ -2571,5 +2579,114 @@ pub mod tests {
         assert_eq!(reader.statistics.write.seek, 1);
         assert_eq!(reader.statistics.write.next, 2);
         assert_eq!(reader.statistics.write.get, 1);
+    }
+
+    #[test]
+    fn test_skip_lock_zero_next() {
+        use proptest::prelude::*;
+
+        #[derive(Debug, Clone)]
+        enum Op {
+            Put,
+            Delete,
+            Lock,
+            Rollback,
+        }
+
+        impl Arbitrary for Op {
+            type Parameters = ();
+            fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+                prop_oneof![
+                    Just(Op::Put),
+                    Just(Op::Delete),
+                    Just(Op::Lock),
+                    Just(Op::Rollback),
+                ]
+                .boxed()
+            }
+
+            type Strategy = BoxedStrategy<Self>;
+        }
+
+        let path = tempfile::Builder::new()
+            .prefix("_test_storage_mvcc_reader_get_write_not_exist_skip_lock")
+            .tempdir()
+            .unwrap();
+        let path = path.path().to_str().unwrap();
+        let region = make_region(1, vec![], vec![]);
+        let db = open_db(path, true);
+        let engine = Arc::new(Mutex::new(RegionEngine::new(&db, &region)));
+
+        let test_id = AtomicU32::new(1);
+        proptest!(
+                |(ops in prop::collection::vec(Op::arbitrary(), 1..1000))| {
+                let k = format!("key_{}", test_id.fetch_add(1, Ordering::SeqCst));
+                let k = k.as_bytes();
+                let mut ts = 1;
+                let mut engine = engine.lock().unwrap();
+                for op in ops {
+                    match op {
+                        Op::Put => {
+                            engine.put(k, ts, ts + 1);
+                            ts += 2;
+                        }
+                        Op::Delete => {
+                            engine.delete(k, ts, ts + 1);
+                            ts += 2;
+                        }
+                        Op::Lock => {
+                            engine.lock(k, ts, ts + 1);
+                            ts += 2;
+                        }
+                        Op::Rollback => {
+                            engine.rollback(k, ts);
+                            ts += 1;
+                        }
+                    }
+                }
+
+                let snap = RegionSnapshot::<RocksSnapshot>::from_raw(db.clone(), region.clone());
+                let mut reader = MvccReader::new(snap, None, false);
+
+                let large_ts = ts + 1;
+
+                // no error
+                let res = reader
+                    .get_write_with_commit_ts(&Key::from_raw(k), large_ts.into(), None);
+                assert!(res.is_ok());
+
+                // don't panic
+                if let Some((write, commit_ts)) = res.unwrap() {
+                    let _last_change = crate::storage::txn::actions::common::next_last_change_info::<Arc<RocksSnapshot>>(
+                        &Key::from_raw(k),
+                        &write,
+                        large_ts.into(),
+                        &mut SnapshotReader::new(large_ts.into(), Arc::new(db.snapshot()), true),
+                        commit_ts,
+                    );
+                }
+            }
+        );
+        // let snap = RegionSnapshot::<RocksSnapshot>::from_raw(db.clone(),
+        // region); let mut reader = MvccReader::new(snap.clone(), None,
+        // false);
+        //
+        // let res = reader
+        //     .get_write_with_commit_ts(&Key::from_raw(k), 40.into(), None)
+        //     .unwrap();
+        // let (write, commit_ts) = res.unwrap();
+        // // should not panic
+        // let last_change =
+        //     crate::storage::txn::actions::common::next_last_change_info::<Arc<RocksSnapshot>>(
+        //         &Key::from_raw(k),
+        //         &write,
+        //         40.into(),
+        //         &mut SnapshotReader::new(40.into(), Arc::new(db.snapshot()),
+        // true),         commit_ts,
+        //     )
+        //     .unwrap()
+        //     .to_parts();
+        // assert_eq!(last_change.0, 2.into());
+        // assert_eq!(last_change.1, 0);
     }
 }
