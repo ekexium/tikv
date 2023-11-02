@@ -347,14 +347,33 @@ fn test_mem_buffer_set() {
     let (k, v) = (b"key".to_vec(), b"value".to_vec());
     let pk = b"primary".to_vec();
     let mut mem_buffer_set_req = MemBufferSetRequest::default();
-    mem_buffer_set_req.set_keys(vec![k].into());
-    mem_buffer_set_req.set_values(vec![v].into());
-    mem_buffer_set_req.set_context(ctx);
+    mem_buffer_set_req.set_keys(vec![pk.clone(), k.clone()].into());
+    mem_buffer_set_req.set_flags(vec![0, 0].into());
+    mem_buffer_set_req.set_values(vec![v.clone(), v.clone()].into());
+    mem_buffer_set_req.set_context(ctx.clone());
     mem_buffer_set_req.set_start_ts(1);
-    mem_buffer_set_req.set_primary(pk);
+    mem_buffer_set_req.set_primary(pk.clone());
     let mem_buffer_set_resp = client.kv_mem_buffer_set(&mem_buffer_set_req).unwrap();
     assert!(!mem_buffer_set_resp.has_region_error());
     assert!(mem_buffer_set_resp.get_error().is_empty());
+
+    let mut commit_req = CommitRequest::default();
+    commit_req.set_context(ctx.clone());
+    commit_req.set_start_version(1);
+    commit_req.set_commit_version(2);
+    commit_req.set_keys(vec![pk.clone(), k.clone()].into());
+    let commit_resp = client.kv_commit(&commit_req).unwrap();
+    assert!(!commit_resp.has_region_error());
+    assert!(!commit_resp.has_error(), "{:?}", commit_resp.get_error());
+
+    let mut get_req = GetRequest::default();
+    get_req.set_context(ctx);
+    get_req.set_key(k);
+    get_req.set_version(10);
+    let get_resp = client.kv_get(&get_req).unwrap();
+    assert!(!get_resp.has_region_error());
+    assert!(!get_resp.has_error(), "get error {:?}", get_resp.get_error());
+    assert_eq!(get_resp.get_value(), v);
 }
 
 #[test_case(test_raftstore::must_new_cluster_and_kv_client)]

@@ -72,8 +72,8 @@ impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for MemBufferSet {
                         LockType::Put
                     },
                     primary: self.primary.clone(),
-                    ts: Default::default(),
-                    ttl: 0,
+                    ts: self.start_ts,
+                    ttl: 3000,
                     short_value: None,
                     for_update_ts: Default::default(),
                     txn_size: 0,
@@ -86,10 +86,11 @@ impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for MemBufferSet {
                     is_locked_with_conflict: false,
                     is_mem_buffer: false,
                     mem_buffer_flags: flag,
-                    mem_buffer_value: value,
+                    mem_buffer_value: value.clone(),
                 },
                 true,
             );
+            txn.put_value(k.clone(), self.start_ts, value);
         }
 
         let new_locks = txn.take_new_locks();

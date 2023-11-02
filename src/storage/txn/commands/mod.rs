@@ -403,8 +403,8 @@ impl From<MemBufferSetRequest> for TypedCommand<()> {
         MemBufferSet::new(
             req.get_start_ts().into(),
             req.take_primary(),
-            req.take_keys()
-                .into_iter()
+            req.get_keys()
+                .iter()
                 .map(|k| Key::from_raw(&k))
                 .collect(),
             req.take_flags().into_iter().map(|f| f as u16).collect(),
