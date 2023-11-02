@@ -36,6 +36,7 @@ const ROLLBACK_TS_PREFIX: u8 = b'r';
 const LAST_CHANGE_PREFIX: u8 = b'l';
 const TXN_SOURCE_PREFIX: u8 = b's';
 const PESSIMISTIC_LOCK_WITH_CONFLICT_PREFIX: u8 = b'F';
+const IS_MEM_BUFFER_PREFIX: u8 = b'm';
 
 impl LockType {
     pub fn from_mutation(mutation: &Mutation) -> Option<LockType> {
@@ -102,6 +103,10 @@ pub struct Lock {
     pub txn_source: u64,
     /// The lock is locked with conflict using fair lock mode.
     pub is_locked_with_conflict: bool,
+
+    pub is_mem_buffer: bool,
+    pub mem_buffer_flags: u16,
+    pub mem_buffer_value: Vec<u8>,
 }
 
 impl std::fmt::Debug for Lock {
@@ -128,6 +133,9 @@ impl std::fmt::Debug for Lock {
             .field("last_change", &self.last_change)
             .field("txn_source", &self.txn_source)
             .field("is_locked_with_conflict", &self.is_locked_with_conflict)
+            .field("is_mem_buffer", &self.is_mem_buffer)
+            .field("value", &self.mem_buffer_value)
+            .field("mem_buffer_flags", &self.mem_buffer_flags)
             .finish()
     }
 }
@@ -159,6 +167,9 @@ impl Lock {
             last_change: LastChange::default(),
             txn_source: 0,
             is_locked_with_conflict,
+            is_mem_buffer: false,
+            mem_buffer_value: Vec::default(),
+            mem_buffer_flags: 0,
         }
     }
 
@@ -241,6 +252,12 @@ impl Lock {
         if self.is_locked_with_conflict {
             b.push(PESSIMISTIC_LOCK_WITH_CONFLICT_PREFIX);
         }
+        if self.is_mem_buffer {
+            assert!(!self.mem_buffer_value.is_empty());
+            b.push(IS_MEM_BUFFER_PREFIX);
+            b.encode_u16(self.mem_buffer_flags).unwrap();
+            b.encode_compact_bytes(&self.mem_buffer_value).unwrap();
+        }
         b
     }
 
@@ -281,6 +298,9 @@ impl Lock {
         }
         if self.is_locked_with_conflict {
             size += 1;
+        }
+        if self.is_mem_buffer {
+            size += 1 + size_of::<u16>() + MAX_VAR_I64_LEN + self.mem_buffer_value.len();
         }
         size
     }
@@ -323,6 +343,9 @@ impl Lock {
         let mut estimated_versions_to_last_change = 0;
         let mut txn_source = 0;
         let mut is_locked_with_conflict = false;
+        let mut is_mem_buffer = false;
+        let mut mem_buffer_value = Vec::new();
+        let mut mem_buffer_flags = 0;
         while !b.is_empty() {
             match b.read_u8()? {
                 SHORT_VALUE_PREFIX => {
@@ -366,6 +389,11 @@ impl Lock {
                 PESSIMISTIC_LOCK_WITH_CONFLICT_PREFIX => {
                     is_locked_with_conflict = true;
                 }
+                IS_MEM_BUFFER_PREFIX => {
+                    is_mem_buffer = true;
+                    mem_buffer_flags = number::decode_u16(&mut b)?;
+                    mem_buffer_value = bytes::decode_compact_bytes(&mut b)?;
+                }
                 _ => {
                     // To support forward compatibility, all fields should be serialized in order
                     // and stop parsing if meets an unknown byte.
@@ -393,6 +421,9 @@ impl Lock {
             lock = lock.use_async_commit(secondaries);
         }
         lock.rollback_ts = rollback_ts;
+        lock.is_mem_buffer = is_mem_buffer;
+        lock.mem_buffer_value = mem_buffer_value;
+        lock.mem_buffer_flags = mem_buffer_flags;
         Ok(lock)
     }
 
@@ -1171,6 +1202,9 @@ mod tests {
             last_change: LastChange::make_exist(8.into(), 2),
             txn_source: 0,
             is_locked_with_conflict: false,
+            is_mem_buffer: false,
+            mem_buffer_flags: 0,
+            mem_buffer_value: vec![],
         };
         assert_eq!(pessimistic_lock.to_lock(), expected_lock);
         assert_eq!(pessimistic_lock.into_lock(), expected_lock);

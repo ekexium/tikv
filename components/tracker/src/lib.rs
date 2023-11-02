@@ -125,6 +125,8 @@ pub enum RequestType {
     CoprocessorDag,
     CoprocessorAnalyze,
     CoprocessorChecksum,
+    KvMemBufferSet,
+    KvMemBufferGet,
 }
 
 #[derive(Debug, Default, Clone)]

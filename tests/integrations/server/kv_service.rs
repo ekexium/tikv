@@ -342,6 +342,23 @@ fn test_mvcc_basic() {
 
 #[test_case(test_raftstore::must_new_cluster_and_kv_client)]
 #[test_case(test_raftstore_v2::must_new_cluster_and_kv_client)]
+fn test_mem_buffer_set() {
+    let (_cluster, client, ctx) = new_cluster();
+    let (k, v) = (b"key".to_vec(), b"value".to_vec());
+    let pk = b"primary".to_vec();
+    let mut mem_buffer_set_req = MemBufferSetRequest::default();
+    mem_buffer_set_req.set_keys(vec![k].into());
+    mem_buffer_set_req.set_values(vec![v].into());
+    mem_buffer_set_req.set_context(ctx);
+    mem_buffer_set_req.set_start_ts(1);
+    mem_buffer_set_req.set_primary(pk);
+    let mem_buffer_set_resp = client.kv_mem_buffer_set(&mem_buffer_set_req).unwrap();
+    assert!(!mem_buffer_set_resp.has_region_error());
+    assert!(mem_buffer_set_resp.get_error().is_empty());
+}
+
+#[test_case(test_raftstore::must_new_cluster_and_kv_client)]
+#[test_case(test_raftstore_v2::must_new_cluster_and_kv_client)]
 fn test_mvcc_rollback_and_cleanup() {
     let (_cluster, client, ctx) = new_cluster();
     let (k, v) = (b"key".to_vec(), b"value".to_vec());

@@ -14,6 +14,7 @@ pub(crate) mod commit;
 pub(crate) mod compare_and_swap;
 pub(crate) mod flashback_to_version;
 pub(crate) mod flashback_to_version_read_phase;
+pub(crate) mod mem_buffer_set;
 pub(crate) mod mvcc_by_key;
 pub(crate) mod mvcc_by_start_ts;
 pub(crate) mod pause;
@@ -70,7 +71,10 @@ use crate::storage::{
     },
     metrics,
     mvcc::{Lock as MvccLock, MvccReader, ReleasedLock, SnapshotReader},
-    txn::{latch, txn_status_cache::TxnStatusCache, ProcessResult, Result},
+    txn::{
+        commands::mem_buffer_set::MemBufferSet, latch, txn_status_cache::TxnStatusCache,
+        ProcessResult, Result,
+    },
     types::{
         MvccInfo, PessimisticLockParameters, PessimisticLockResults, PrewriteResult,
         SecondaryLocksStatus, StorageCallbackType, TxnStatus,
@@ -108,6 +112,7 @@ pub enum Command {
     RawAtomicStore(RawAtomicStore),
     FlashbackToVersionReadPhase(FlashbackToVersionReadPhase),
     FlashbackToVersion(FlashbackToVersion),
+    MemBufferSet(MemBufferSet),
 }
 
 /// A `Command` with its return type, reified as the generic parameter `T`.
@@ -393,6 +398,22 @@ impl From<FlashbackToVersionRequest> for TypedCommand<()> {
     }
 }
 
+impl From<MemBufferSetRequest> for TypedCommand<()> {
+    fn from(mut req: MemBufferSetRequest) -> Self {
+        MemBufferSet::new(
+            req.get_start_ts().into(),
+            req.take_primary(),
+            req.take_keys()
+                .into_iter()
+                .map(|k| Key::from_raw(&k))
+                .collect(),
+            req.take_flags().into_iter().map(|f| f as u16).collect(),
+            req.take_values().into(),
+            req.take_context(),
+        )
+    }
+}
+
 /// Represents for a scheduler command, when should the response sent to the
 /// client. For most cases, the response should be sent after the result being
 /// successfully applied to the storage (if needed). But in some special cases,
@@ -639,6 +660,7 @@ impl Command {
             Command::RawAtomicStore(t) => t,
             Command::FlashbackToVersionReadPhase(t) => t,
             Command::FlashbackToVersion(t) => t,
+            Command::MemBufferSet(t) => t,
         }
     }
 
@@ -665,6 +687,7 @@ impl Command {
             Command::RawAtomicStore(t) => t,
             Command::FlashbackToVersionReadPhase(t) => t,
             Command::FlashbackToVersion(t) => t,
+            Command::MemBufferSet(t) => t,
         }
     }
 
@@ -705,6 +728,7 @@ impl Command {
             Command::RawCompareAndSwap(t) => t.process_write(snapshot, context),
             Command::RawAtomicStore(t) => t.process_write(snapshot, context),
             Command::FlashbackToVersion(t) => t.process_write(snapshot, context),
+            Command::MemBufferSet(t) => t.process_write(snapshot, context),
             _ => panic!("unsupported write command"),
         }
     }

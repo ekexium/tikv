@@ -245,6 +245,12 @@ macro_rules! set_total_time {
 }
 
 impl<E: Engine, L: LockManager, F: KvFormat> Tikv for Service<E, L, F> {
+    handle_request!(
+        kv_mem_buffer_set,
+        future_mem_buffer_set,
+        MemBufferSetRequest,
+        MemBufferSetResponse
+    );
     handle_request!(kv_get, future_get, GetRequest, GetResponse, has_time_detail);
     handle_request!(kv_scan, future_scan, ScanRequest, ScanResponse);
     handle_request!(
@@ -2081,6 +2087,11 @@ txn_command_future!(future_prewrite, PrewriteRequest, PrewriteResponse, (v, resp
         resp.set_one_pc_commit_ts(v.one_pc_commit_ts.into_inner());
     }
     resp.set_errors(extract_key_errors(v.map(|v| v.locks)).into());
+});
+txn_command_future!(future_mem_buffer_set, MemBufferSetRequest, MemBufferSetResponse, (v, resp) {
+    if let Err(e) = v {
+        resp.set_error(e.to_string());
+    }
 });
 txn_command_future!(future_acquire_pessimistic_lock, PessimisticLockRequest, PessimisticLockResponse,
     (req) {
