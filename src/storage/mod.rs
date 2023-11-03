@@ -591,6 +591,84 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
         Ok(())
     }
 
+    pub fn mem_buffer_get(
+        &self,
+        mut ctx: Context,
+        key: Key,
+        start_ts: TimeStamp,
+    ) -> impl Future<Output = Result<(Option<Value>, KvGetStatistics)>> {
+        let deadline = Self::get_deadline(&ctx);
+        const CMD: CommandKind = CommandKind::mem_buffer_get;
+        let priority = ctx.get_priority();
+        let metadata = TaskMetadata::from_ctx(ctx.get_resource_control_context());
+        let resource_limiter = self.resource_manager.as_ref().and_then(|r| {
+            r.get_resource_limiter(
+                ctx.get_resource_control_context().get_resource_group_name(),
+                ctx.get_request_source(),
+            )
+        });
+        let priority_tag = get_priority_tag(priority);
+        let resource_tag = self.resource_tag_factory.new_tag_with_key_ranges(
+            &ctx,
+            vec![(key.as_encoded().to_vec(), key.as_encoded().to_vec())],
+        );
+        let concurrency_manager = self.concurrency_manager.clone();
+        let api_version = self.api_version;
+        let busy_threshold = Duration::from_millis(ctx.busy_threshold_ms as u64);
+
+        self.read_pool_spawn_with_busy_check(
+            busy_threshold,
+            async move {
+                KV_COMMAND_COUNTER_VEC_STATIC.get(CMD).inc();
+                SCHED_COMMANDS_PRI_COUNTER_VEC_STATIC
+                    .get(priority_tag)
+                    .inc();
+
+                deadline.check()?;
+
+                Self::check_api_version(api_version, ctx.api_version, CMD, [key.as_encoded()])?;
+
+                // The bypass_locks and access_locks set will be checked at most once.
+                // `TsSet::vec` is more efficient here.
+                let bypass_locks = TsSet::vec_from_u64s(ctx.take_resolved_locks());
+
+                let snap_ctx = prepare_snap_ctx(
+                    &ctx,
+                    iter::once(&key),
+                    start_ts,
+                    &bypass_locks,
+                    &concurrency_manager,
+                    CMD,
+                )?;
+                let snapshot =
+                    Self::with_tls_engine(|engine| Self::snapshot(engine, snap_ctx)).await?;
+
+                {
+                    let mut reader = MvccReader::new(
+                        snapshot,
+                        Some(ScanMode::Forward),
+                        !ctx.get_not_fill_cache(),
+                    );
+                    let result = reader.load_lock(&key).unwrap_or(None).and_then(|lock| {
+                        if lock.ts == start_ts {
+                            Some(lock.mem_buffer_value)
+                        } else {
+                            None
+                        }
+                    });
+                    Ok((
+                        result,
+                        KvGetStatistics::default()
+                    ))
+                }
+            }
+            .in_resource_metering_tag(resource_tag),
+            priority,
+            thread_rng().next_u64(),
+            metadata,
+            resource_limiter,
+        )
+    }
     /// Get value of the given key from a snapshot.
     ///
     /// Only writes that are committed before `start_ts` are visible.
@@ -681,13 +759,13 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
                             false,
                         );
                         snap_store
-                    .get(&key, &mut statistics)
-                    // map storage::txn::Error -> storage::Error
-                    .map_err(Error::from)
-                    .map(|r| {
-                        KV_COMMAND_KEYREAD_HISTOGRAM_STATIC.get(CMD).observe(1_f64);
-                        r
-                    })
+                            .get(&key, &mut statistics)
+                            // map storage::txn::Error -> storage::Error
+                            .map_err(Error::from)
+                            .map(|r| {
+                                KV_COMMAND_KEYREAD_HISTOGRAM_STATIC.get(CMD).observe(1_f64);
+                                r
+                            })
                     });
                     metrics::tls_collect_scan_details(CMD, &statistics);
                     metrics::tls_collect_read_flow(
@@ -4788,7 +4866,7 @@ mod tests {
                 Some(b"cc".to_vec()),
                 None,
                 Some(b"aa".to_vec()),
-                Some(b"bb".to_vec())
+                Some(b"bb".to_vec()),
             ]
         );
     }
@@ -6769,7 +6847,7 @@ mod tests {
         ]);
         // TODO: refactor to use `Api` parameter.
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false),
             true
         );
 
@@ -6779,7 +6857,7 @@ mod tests {
             (b"c".to_vec(), vec![]),
         ]);
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false),
             true
         );
 
@@ -6789,7 +6867,7 @@ mod tests {
             (b"c3".to_vec(), b"c".to_vec()),
         ]);
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false),
             false
         );
 
@@ -6801,7 +6879,7 @@ mod tests {
             (b"a".to_vec(), vec![]),
         ]);
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, false),
             false
         );
 
@@ -6811,7 +6889,7 @@ mod tests {
             (b"c3".to_vec(), b"c".to_vec()),
         ]);
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true),
             true
         );
 
@@ -6821,7 +6899,7 @@ mod tests {
             (b"a3".to_vec(), vec![]),
         ]);
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true),
             true
         );
 
@@ -6831,7 +6909,7 @@ mod tests {
             (b"c".to_vec(), b"c3".to_vec()),
         ]);
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true),
             false
         );
 
@@ -6841,7 +6919,7 @@ mod tests {
             (b"c3".to_vec(), vec![]),
         ]);
         assert_eq!(
-            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true,),
+            <StorageApiV1<RocksEngine, MockLockManager>>::check_key_ranges(&ranges, true),
             false
         );
     }
@@ -7535,7 +7613,7 @@ mod tests {
                 lock_c.clone(),
                 lock_x.clone(),
                 lock_y.clone(),
-                lock_z
+                lock_z,
             ]
         );
 
@@ -7563,7 +7641,7 @@ mod tests {
                 lock_b.clone(),
                 lock_c.clone(),
                 lock_x.clone(),
-                lock_y.clone()
+                lock_y.clone(),
             ]
         );
 
@@ -7614,7 +7692,7 @@ mod tests {
                 lock_b.clone(),
                 lock_c.clone(),
                 lock_x.clone(),
-                lock_y.clone()
+                lock_y.clone(),
             ]
         );
         drop(guard);
@@ -9988,6 +10066,7 @@ mod tests {
             .unwrap();
         assert!(rx.recv().unwrap() > 10);
     }
+
     // this test shows that the scheduler take `response_policy` in `WriteResult`
     // serious, ie. call the callback at expected stage when writing to the
     // engine

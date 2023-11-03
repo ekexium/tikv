@@ -357,6 +357,15 @@ fn test_mem_buffer_set() {
     assert!(!mem_buffer_set_resp.has_region_error());
     assert!(mem_buffer_set_resp.get_error().is_empty());
 
+    let mut mem_buffer_get_req = MemBufferGetRequest::default();
+    mem_buffer_get_req.set_context(ctx.clone());
+    mem_buffer_get_req.set_key(k.clone());
+    mem_buffer_get_req.set_start_ts(1);
+    let mem_buffer_get_resp = client.kv_mem_buffer_get(&mem_buffer_get_req).unwrap();
+    assert!(!mem_buffer_get_resp.has_region_error());
+    assert!(mem_buffer_get_resp.get_error().is_empty());
+    assert_eq!(mem_buffer_get_resp.get_value(), &v);
+
     let mut commit_req = CommitRequest::default();
     commit_req.set_context(ctx.clone());
     commit_req.set_start_version(1);
@@ -372,7 +381,11 @@ fn test_mem_buffer_set() {
     get_req.set_version(10);
     let get_resp = client.kv_get(&get_req).unwrap();
     assert!(!get_resp.has_region_error());
-    assert!(!get_resp.has_error(), "get error {:?}", get_resp.get_error());
+    assert!(
+        !get_resp.has_error(),
+        "get error {:?}",
+        get_resp.get_error()
+    );
     assert_eq!(get_resp.get_value(), v);
 }
 

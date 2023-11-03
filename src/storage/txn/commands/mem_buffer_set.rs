@@ -84,7 +84,7 @@ impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for MemBufferSet {
                     last_change: Default::default(),
                     txn_source: 0,
                     is_locked_with_conflict: false,
-                    is_mem_buffer: false,
+                    is_mem_buffer: true,
                     mem_buffer_flags: flag,
                     mem_buffer_value: value.clone(),
                 },

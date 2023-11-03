@@ -252,6 +252,7 @@ impl<E: Engine, L: LockManager, F: KvFormat> Tikv for Service<E, L, F> {
         MemBufferSetResponse
     );
     handle_request!(kv_get, future_get, GetRequest, GetResponse, has_time_detail);
+    handle_request!(kv_mem_buffer_get, future_mem_buffer_get, MemBufferGetRequest, MemBufferGetResponse);
     handle_request!(kv_scan, future_scan, ScanRequest, ScanResponse);
     handle_request!(
         kv_prewrite,
@@ -1341,6 +1342,36 @@ async fn future_handle_empty(
             .await;
     }
     Ok(res)
+}
+
+fn future_mem_buffer_get<E: Engine, L: LockManager, F: KvFormat>(
+    storage: &Storage<E, L, F>,
+    mut req: MemBufferGetRequest,
+) -> impl Future<Output = ServerResult<MemBufferGetResponse>> {
+    let v = storage.mem_buffer_get(
+        req.take_context(),
+        Key::from_raw(req.get_key()),
+        req.get_start_ts().into(),
+    );
+
+    async move {
+        let v = v.await;
+        let mut resp = MemBufferGetResponse::default();
+        if let Some(err) = extract_region_error(&v) {
+            resp.set_region_error(err);
+        } else {
+            match v {
+                Ok((val, _stats)) => {
+                    match val {
+                        Some(val) => resp.set_value(val),
+                        None => {},
+                    }
+                }
+                Err(e) => resp.set_error(e.to_string()),
+            }
+        }
+        Ok(resp)
+    }
 }
 
 fn future_get<E: Engine, L: LockManager, F: KvFormat>(
