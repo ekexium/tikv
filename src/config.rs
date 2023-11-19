@@ -1205,6 +1205,7 @@ impl DbConfig {
         let enable_multi_batch_write = !self.enable_pipelined_write && !self.enable_unordered_write;
         info!("build_opt"; "enable_pipelined_write" => self.enable_pipelined_write,
             "enable_multi_batch_write" => enable_multi_batch_write,
+            "enable_multi_batch_write_from_cfg" => self.enable_multi_batch_write,
         );
         opts.enable_multi_batch_write(enable_multi_batch_write);
         opts.enable_unordered_write(self.enable_unordered_write);
