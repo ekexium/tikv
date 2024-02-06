@@ -185,3 +185,35 @@ impl Flush {
         Ok(locks)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::storage::{
+        mvcc::tests::{must_get, must_locked},
+        txn::tests::{must_commit, must_flush_put, must_flush_put_err},
+        TestEngineBuilder,
+    };
+
+    #[test]
+    fn test_flush() {
+        let mut engine = TestEngineBuilder::new().build().unwrap();
+        let k = b"key";
+        let v = b"value";
+        let start_ts = 1;
+        must_flush_put(&mut engine, k, v.clone(), k, start_ts);
+        must_locked(&mut engine, k, start_ts);
+        must_commit(&mut engine, k, start_ts, start_ts + 1);
+        must_get(&mut engine, k, start_ts + 1, v);
+    }
+
+    #[test]
+    fn test_write_conflict() {
+        let mut engine = TestEngineBuilder::new().build().unwrap();
+        let k = b"key";
+        let v = b"value";
+        let start_ts = 1;
+        must_flush_put(&mut engine, k, v.clone(), k, start_ts);
+        must_locked(&mut engine, k, start_ts);
+        must_flush_put_err(&mut engine, k, v.clone(), k, start_ts + 1);
+    }
+}

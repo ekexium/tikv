@@ -4,17 +4,23 @@
 
 use concurrency_manager::ConcurrencyManager;
 use kvproto::kvrpcpb::{
-    Assertion, AssertionLevel, Context,
+    Assertion, AssertionLevel, Context, ExtraOp,
     PrewriteRequestPessimisticAction::{self, *},
 };
 use prewrite::{prewrite, CommitKind, TransactionKind, TransactionProperties};
-use tikv_kv::SnapContext;
+use tikv_kv::{SnapContext, Statistics};
 
 use super::*;
 use crate::storage::{
     kv::WriteData,
+    lock_manager::MockLockManager,
     mvcc::{tests::write, Error, Key, Mutation, MvccTxn, SnapshotReader, TimeStamp},
-    txn, Engine,
+    txn,
+    txn::{
+        commands::{Flush, WriteContext, WriteResult},
+        txn_status_cache::TxnStatusCache,
+    },
+    Engine,
 };
 
 pub fn must_prewrite_put_impl<E: Engine>(
@@ -947,4 +953,61 @@ pub fn must_rollback_err<E: Engine>(engine: &mut E, key: &[u8], start_ts: impl I
         false,
     )
     .unwrap_err();
+}
+
+pub fn flush_put_impl<E: Engine>(
+    engine: &mut E,
+    key: &[u8],
+    value: impl Into<Vec<u8>>,
+    pk: impl Into<Vec<u8>>,
+    start_ts: impl Into<TimeStamp>,
+) -> txn::Result<WriteResult> {
+    let key = Key::from_raw(key);
+    let start_ts = start_ts.into();
+    let cmd = Flush::new(
+        start_ts,
+        pk.into(),
+        vec![Mutation::make_put(key.into(), value.into())],
+        3000,
+        AssertionLevel::Strict,
+        Context::new(),
+    );
+    let mut statistics = Statistics::default();
+    let cm = ConcurrencyManager::new(start_ts);
+    let context = WriteContext {
+        lock_mgr: &MockLockManager::new(),
+        concurrency_manager: cm.clone(),
+        extra_op: ExtraOp::Noop,
+        statistics: &mut statistics,
+        async_apply_prewrite: false,
+        raw_ext: None,
+        txn_status_cache: &TxnStatusCache::new_for_test(),
+    };
+    let snapshot = engine.snapshot(Default::default()).unwrap();
+    cmd.cmd.process_write(snapshot.clone(), context)
+}
+
+pub fn must_flush_put<E: Engine>(
+    engine: &mut E,
+    key: &[u8],
+    value: impl Into<Vec<u8>>,
+    pk: impl Into<Vec<u8>>,
+    start_ts: impl Into<TimeStamp>,
+) {
+    let res = flush_put_impl(engine, key, value, pk, start_ts);
+    assert!(res.is_ok());
+    let res = res.unwrap();
+    let to_be_write = res.to_be_write;
+    engine.write(&Context::new(), to_be_write).unwrap();
+}
+
+pub fn must_flush_put_err<E: Engine>(
+    engine: &mut E,
+    key: &[u8],
+    value: impl Into<Vec<u8>>,
+    pk: impl Into<Vec<u8>>,
+    start_ts: impl Into<TimeStamp>,
+) {
+    let res = flush_put_impl(engine, key, value, pk, start_ts);
+    assert!(res.is_err());
 }
