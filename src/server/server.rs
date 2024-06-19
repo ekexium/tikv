@@ -152,6 +152,8 @@ where
             .http2_max_ping_strikes(i32::MAX) // For pings without data from clients.
             .keepalive_time(cfg.value().grpc_keepalive_time.into())
             .keepalive_timeout(cfg.value().grpc_keepalive_timeout.into())
+            .default_compression_algorithm(cfg.value().grpc_compression_algorithm())
+            .default_gzip_compression_level(cfg.value().grpc_gzip_compression_level)
             .build_args();
 
         let builder = {
