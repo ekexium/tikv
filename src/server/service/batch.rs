@@ -24,8 +24,6 @@ use crate::{
 };
 
 pub const MAX_BATCH_GET_REQUEST_COUNT: usize = 10;
-pub const MIN_BATCH_GET_REQUEST_COUNT: usize = 4;
-pub const MAX_QUEUE_SIZE_PER_WORKER: usize = 16;
 
 pub struct ReqBatcher {
     gets: Vec<GetRequest>,
@@ -34,7 +32,7 @@ pub struct ReqBatcher {
     get_trackers: Vec<TrackerToken>,
     raw_get_ids: Vec<u64>,
     begin_instant: Instant,
-    batch_size: usize,
+    _batch_size: usize,
 }
 
 impl ReqBatcher {
@@ -47,7 +45,7 @@ impl ReqBatcher {
             get_trackers: vec![],
             raw_get_ids: vec![],
             begin_instant,
-            batch_size: std::cmp::min(batch_size, MAX_BATCH_GET_REQUEST_COUNT),
+            _batch_size: std::cmp::min(batch_size, MAX_BATCH_GET_REQUEST_COUNT),
         }
     }
 
@@ -80,14 +78,14 @@ impl ReqBatcher {
         storage: &Storage<E, L, F>,
         tx: &Sender<MeasuredSingleResponse>,
     ) {
-        if self.gets.len() >= self.batch_size {
+        if self.gets.len() >= 10 {
             let gets = std::mem::take(&mut self.gets);
             let ids = std::mem::take(&mut self.get_ids);
             let trackers = std::mem::take(&mut self.get_trackers);
             future_batch_get_command(storage, ids, gets, trackers, tx.clone(), self.begin_instant);
         }
 
-        if self.raw_gets.len() >= self.batch_size {
+        if self.raw_gets.len() >= 16 {
             let gets = std::mem::take(&mut self.raw_gets);
             let ids = std::mem::take(&mut self.raw_get_ids);
             future_batch_raw_get_command(storage, ids, gets, tx.clone(), self.begin_instant);
@@ -122,32 +120,22 @@ impl ReqBatcher {
 }
 
 pub struct BatcherBuilder {
-    pool_size: usize,
+    _pool_size: usize,
     enable_batch: bool,
 }
 
 impl BatcherBuilder {
-    pub fn new(enable_batch: bool, pool_size: usize) -> Self {
+    pub fn new(enable_batch: bool, _pool_size: usize) -> Self {
         BatcherBuilder {
             enable_batch,
-            pool_size,
+            _pool_size,
         }
     }
-    pub fn build(&self, queue_per_worker: usize, req_batch_size: usize) -> Option<ReqBatcher> {
+    pub fn build(&self, _queue_per_worker: usize, req_batch_size: usize) -> Option<ReqBatcher> {
         if !self.enable_batch {
             return None;
         }
-        if req_batch_size > self.pool_size * MIN_BATCH_GET_REQUEST_COUNT
-            && queue_per_worker >= MIN_BATCH_GET_REQUEST_COUNT
-        {
-            return Some(ReqBatcher::new(req_batch_size / self.pool_size));
-        }
-        if req_batch_size >= MIN_BATCH_GET_REQUEST_COUNT
-            && queue_per_worker >= MAX_QUEUE_SIZE_PER_WORKER
-        {
-            return Some(ReqBatcher::new(req_batch_size));
-        }
-        None
+        Some(ReqBatcher::new(req_batch_size))
     }
 }
 
