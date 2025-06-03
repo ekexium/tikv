@@ -26,7 +26,7 @@ txn_types = { workspace = true }
 criterion = "0.3"
 futures = "0.3"
 rand = "0.8.3"
-tikv_alloc = { workspace = true, features = ["jemalloc"] }
+tikv_alloc = { workspace = true, features = ["jemalloc", "mem-profiling"] }
 
 [[bench]]
 name = "lock_table"

@@ -1073,9 +1073,9 @@ fn test_memory_leak_hot_vs_new_keys() {
 fn test_memory_leak_pure_new_keys() {
     // Test with only new keys (never repeated) - this should expose key space growth issues
     let config = StressTestConfig {
-        duration_seconds: 1200, // 20 minutes
-        concurrent_threads: 8,
-        key_range: 0, // Not used in this test
+        duration_seconds: 1800,
+        concurrent_threads: 12,
+        key_range: 200,
         memory_check_interval_seconds: 10,
         ..Default::default()
     };
