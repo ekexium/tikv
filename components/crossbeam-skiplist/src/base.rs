@@ -14,6 +14,10 @@ use core::sync::atomic::{fence, AtomicUsize, Ordering};
 use crossbeam_epoch::{self as epoch, Atomic, Collector, Guard, Shared};
 use crossbeam_utils::CachePadded;
 
+pub static NODE_ALLOCS: AtomicUsize = AtomicUsize::new(0);
+pub static NODE_DEALLOCS: AtomicUsize = AtomicUsize::new(0);
+pub static NODE_DEFERRED: AtomicUsize = AtomicUsize::new(0);
+
 /// Number of bits needed to store height.
 const HEIGHT_BITS: usize = 5;
 
@@ -99,6 +103,7 @@ impl<K, V> Node<K, V> {
     /// with null pointers. However, the key and the value will be left uninitialized, and that is
     /// why this function is unsafe.
     unsafe fn alloc(height: usize, ref_count: usize) -> *mut Self {
+        NODE_ALLOCS.fetch_add(1, Ordering::Relaxed);
         let layout = Self::get_layout(height);
         unsafe {
             let ptr = alloc(layout).cast::<Self>();
@@ -119,6 +124,7 @@ impl<K, V> Node<K, V> {
     ///
     /// This function will not run any destructors.
     unsafe fn dealloc(ptr: *mut Self) {
+        NODE_DEALLOCS.fetch_add(1, Ordering::Relaxed);
         unsafe {
             let height = (*ptr).height();
             let layout = Self::get_layout(height);
@@ -227,6 +233,7 @@ impl<K, V> Node<K, V> {
             == 1
         {
             fence(Ordering::Acquire);
+            NODE_DEFERRED.fetch_add(1, Ordering::Relaxed);
             unsafe { guard.defer_unchecked(move || Self::finalize(self)) }
         }
     }
@@ -245,6 +252,7 @@ impl<K, V> Node<K, V> {
             == 1
         {
             fence(Ordering::Acquire);
+            NODE_DEFERRED.fetch_add(1, Ordering::Relaxed);
             let guard = &pin();
             parent.check_guard(guard);
             unsafe { guard.defer_unchecked(move || Self::finalize(self)) }
@@ -2031,6 +2039,11 @@ where
             };
             if below_upper_bound(&bound, h.key().borrow()) {
                 self.head.clone_from(&next_head);
+                // if let Some(e) = mem::replace(&mut self.head, next_head.clone()) {
+                //     unsafe {
+                //         e.node.decrement(guard);
+                //     }
+                // }
                 next_head
             } else {
                 unsafe {
@@ -2058,6 +2071,11 @@ where
             };
             if above_lower_bound(&bound, t.key().borrow()) {
                 self.tail.clone_from(&next_tail);
+                // if let Some(e) = mem::replace(&mut self.tail, next_tail.clone()) {
+                //     unsafe {
+                //         e.node.decrement(guard);
+                //     }
+                // }
                 next_tail
             } else {
                 unsafe {
